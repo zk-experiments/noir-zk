@@ -131,7 +131,7 @@ struct Compiled {
     noir: String,
 }
 
-const USAGE: &str = "usage: noir-zk freeze --target DIR --vk-tree FILE --out DIR --assets DIR \
+const USAGE: &str = "usage: noir-zk freeze --target DIR --out DIR --assets DIR \
 [--vk-tree FILE] [--exclude PREFIX].. [--honk-oracle poseidon2|keccak] [--check | --abi-change]";
 
 fn main() {
