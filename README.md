@@ -1,6 +1,6 @@
 # noir-zk
 
-Tooling and a library for proving Noir circuits with barretenberg's Chonk folding, in Rust. A circuit repository freezes its compiled circuits with the `noir-zk` CLI, generates typed bindings with `noir-zk-codegen` from its `build.rs`, and proves and verifies through `noir-zk-backend`. Ported from psonet's circuit layer without `pso-protocol`. [eid-circuits](https://github.com/zk-experiments/eid-circuits) (crate `eid-zk`) is the first consumer.
+Tooling and a library for proving Noir circuits with barretenberg's Chonk folding, in Rust. A circuit repository freezes its compiled circuits with the `noir-zk` CLI, generates typed bindings with `noir-zk-codegen` from its `build.rs`, and proves and verifies through `noir-zk-backend`. Ported from psonet's circuit layer without `pso-protocol`. [eid-circuits](https://github.com/zk-experiments/eid-circuits) (crate `eid-circuits`) is the first consumer.
 
 Toolchain: Noir `1.0.0-rc.3` (the linked ACVM), Barretenberg `7.0.0-nightly.20260927` (linked through `barretenberg-rs`, no `bb` binary needed). Proofs from other bb versions do not verify.
 
@@ -51,7 +51,7 @@ Toolchain: Noir `1.0.0-rc.3` (the linked ACVM), Barretenberg `7.0.0-nightly.2026
    let artifacts = noir_zk_backend::Frozen::new(circuits::REGISTRY, &circuits::VK_TREE_ROOT, DirStore(assets))?;
    ```
 
-4. Prove: solve each step with `witness::Program`, then fold the stack with `chonk::prove(&[Step])` and check it with `chonk::verify(&proof, hiding_vk)`. What goes into the kernels is the circuit repository's business. eid-circuits' `eid-zk` builds its five kernels' inputs and exposes `prove_document` / `verify_document`.
+4. Prove: solve each step with `witness::Program`, then fold the stack with `chonk::prove(&[Step])` and check it with `chonk::verify(&proof, hiding_vk)`. What goes into the kernels is the circuit repository's business. the `eid-circuits` crate builds its five kernels' inputs and exposes `prove_document` / `verify_document`.
 
 For typed inputs without freezing, `noir_zk_codegen::generate_types(&nargo_target_abis("target", |_| true)?)` works from any nargo output.
 
@@ -73,4 +73,4 @@ A Chonk proof is fixed-size for a given bb version: 39,872 bytes (1,246 fields o
 
 ## Tests
 
-`cargo test` runs the unit tests. End-to-end proving tests (frozen registry, CLI-proof interop, tampered assets) live with the circuits in eid-circuits' `eid-zk`. CI never proves.
+`cargo test` runs the unit tests. End-to-end proving tests (frozen registry, CLI-proof interop, tampered assets) live with the circuits in the `eid-circuits` crate. CI never proves.

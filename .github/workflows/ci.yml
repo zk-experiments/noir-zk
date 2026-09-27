@@ -5,7 +5,7 @@
 #   supply-chain ──┘
 #
 # CI never proves: end-to-end proving tests live with the circuits
-# (eid-circuits `eid-zk`).
+# (the `eid-circuits` crate).
 #
 # Triggers
 #   push:main         full pipeline incl. cog auto-bump and, when cog tagged, release
