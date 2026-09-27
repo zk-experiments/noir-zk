@@ -1,8 +1,11 @@
-//! Circuit packs: `.tar.gz` archives of bytecode assets
-//! (`<label>@<version>.b64`), so a prover fetches a group of circuits at once
-//! (`noir-zk pack` writes them). A pack is only transport: unpack it into a
-//! directory and read it with [`DirStore`](crate::store::DirStore); `Frozen`
-//! still checks every asset against its pinned hash. Feature `packs`.
+//! Circuit packs: self-contained `.tar.gz` archives of a group of circuits,
+//! so a prover fetches them at once (`noir-zk pack` writes them). Per
+//! circuit: `<label>@<version>.b64` (bytecode), `.vk` (verification key) and
+//! `.abi.json`; plus `vk-tree.json` (the key tree) and `manifest.toml` (the
+//! included entries with their pinned hashes). A pack is only transport:
+//! unpack it into a directory and read it with
+//! [`DirStore`](crate::store::DirStore); `Frozen` still checks every asset
+//! against its pinned hash. Feature `packs`.
 
 use std::io::{Read, Write};
 use std::path::Path;
@@ -17,10 +20,16 @@ fn io(what: &str) -> impl Fn(std::io::Error) -> Error + '_ {
     move |e| Error::Artifact(format!("{what}: {e}"))
 }
 
-/// Whether `name` is an asset name a pack may hold: `<label>@<version>.b64`,
-/// a bare file name.
-fn is_asset_name(name: &str) -> bool {
-    name.ends_with(".b64")
+/// Whether `name` may be a pack entry: a bare file name, either
+/// `<label>@<version>` with `.b64`, `.vk` or `.abi.json`, or `vk-tree.json` /
+/// `manifest.toml`.
+fn is_pack_entry(name: &str) -> bool {
+    if name == "vk-tree.json" || name == "manifest.toml" {
+        return true;
+    }
+    [".b64", ".vk", ".abi.json"]
+        .iter()
+        .any(|e| name.ends_with(e))
         && name.contains('@')
         && !name.starts_with('.')
         && name
@@ -28,15 +37,15 @@ fn is_asset_name(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b"_-.@".contains(&b))
 }
 
-/// Writes `assets` (name, bytes) as a pack. The archive is deterministic:
+/// Writes `entries` (name, bytes) as a pack. The archive is deterministic:
 /// sorted, with fixed metadata, so the same assets give the same bytes.
-pub fn write_pack(assets: &[(String, Vec<u8>)], out: impl Write) -> Result<(), Error> {
-    let mut sorted: Vec<&(String, Vec<u8>)> = assets.iter().collect();
+pub fn write_pack(entries: &[(String, Vec<u8>)], out: impl Write) -> Result<(), Error> {
+    let mut sorted: Vec<&(String, Vec<u8>)> = entries.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(&b.0));
     let mut tar = tar::Builder::new(GzEncoder::new(out, Compression::best()));
     for (name, bytes) in sorted {
-        if !is_asset_name(name) {
-            return Err(Error::Artifact(format!("{name}: not an asset name")));
+        if !is_pack_entry(name) {
+            return Err(Error::Artifact(format!("{name}: not a pack entry name")));
         }
         let mut h = tar::Header::new_gnu();
         h.set_size(bytes.len() as u64);
@@ -53,8 +62,8 @@ pub fn write_pack(assets: &[(String, Vec<u8>)], out: impl Write) -> Result<(), E
     Ok(())
 }
 
-/// Unpacks a pack into `dir` and returns the asset names written. Only plain
-/// asset files with bare names are accepted: no directories, links or paths.
+/// Unpacks a pack into `dir` and returns the entry names written. Only plain
+/// files with pack entry names are accepted: no directories, links or paths.
 pub fn unpack(pack: impl Read, dir: &Path) -> Result<Vec<String>, Error> {
     std::fs::create_dir_all(dir).map_err(io("unpack"))?;
     let mut names = vec![];
@@ -67,9 +76,9 @@ pub fn unpack(pack: impl Read, dir: &Path) -> Result<Vec<String>, Error> {
             .to_str()
             .map(str::to_string)
             .unwrap_or_default();
-        if entry.header().entry_type() != tar::EntryType::Regular || !is_asset_name(&name) {
+        if entry.header().entry_type() != tar::EntryType::Regular || !is_pack_entry(&name) {
             return Err(Error::Artifact(format!(
-                "pack entry {name:?} is not a plain asset file"
+                "pack entry {name:?} is not a plain pack file"
             )));
         }
         let mut bytes = vec![];
@@ -104,8 +113,25 @@ mod tests {
 
     #[test]
     fn rejects_paths_and_other_names() {
-        for bad in ["../x@1.b64", "d/x@1.b64", "x.b64", ".x@1.b64", "x@1.txt"] {
-            assert!(!is_asset_name(bad), "{bad}");
+        for bad in [
+            "../x@1.b64",
+            "d/x@1.b64",
+            "x.b64",
+            ".x@1.b64",
+            "x@1.txt",
+            "vk-tree.json.b64x",
+            "../manifest.toml",
+        ] {
+            assert!(!is_pack_entry(bad), "{bad}");
+        }
+        for good in [
+            "x@1.0.0.b64",
+            "x@1.0.0.vk",
+            "x@1.0.0.abi.json",
+            "vk-tree.json",
+            "manifest.toml",
+        ] {
+            assert!(is_pack_entry(good), "{good}");
         }
         // An archive with a path entry is refused on unpack.
         let mut raw = vec![];

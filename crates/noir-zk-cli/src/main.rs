@@ -136,7 +136,7 @@ struct Compiled {
 
 const USAGE: &str = "usage: noir-zk freeze --target DIR --out DIR --assets DIR \
 [--vk-tree FILE] [--exclude PREFIX].. [--honk-oracle poseidon2|keccak] [--check | --abi-change]
-       noir-zk pack --out DIR --assets DIR --packs FILE --dest DIR";
+       noir-zk pack --out DIR --assets DIR --packs FILE --dest DIR [--version V]";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -198,78 +198,101 @@ fn main() {
     freeze(&o);
 }
 
-/// `noir-zk pack`: writes `<dest>/<name>.tar.gz` for every `[name]` of the
-/// packs file (`circuits = [labels]`), holding the active version's asset of
-/// each circuit from `--assets`, checked against the manifest in `--out`.
+/// `noir-zk pack`: for every table of the packs file with `circuits =
+/// [labels]`, writes `<dest>/<name>@<version>.tar.gz` (`<name>.tar.gz`
+/// without `--version`): per circuit its active version's bytecode (from
+/// `--assets`, checked against the pin), verification key and ABI, plus the
+/// key tree and the manifest's entries for them. Other tables are skipped.
 fn pack(args: &[String]) {
-    let mut flags: BTreeMap<&str, PathBuf> = BTreeMap::new();
+    let mut flags: BTreeMap<&str, String> = BTreeMap::new();
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
-            "--out" | "--assets" | "--packs" | "--dest" => {
+            "--out" | "--assets" | "--packs" | "--dest" | "--version" => {
                 let v = it
                     .next()
                     .unwrap_or_else(|| fail(format!("{a} needs a value")));
-                flags.insert(a.as_str(), v.into());
+                flags.insert(a.as_str(), v.clone());
             }
             other => fail(format!("unknown flag {other:?}\n{USAGE}")),
         }
     }
-    let flag = |f: &str| {
+    let flag = |f: &str| -> PathBuf {
         flags
             .get(f)
-            .cloned()
+            .map(PathBuf::from)
             .unwrap_or_else(|| fail(format!("{f} is required\n{USAGE}")))
     };
     let (out, assets, dest) = (flag("--out"), flag("--assets"), flag("--dest"));
-    let manifest: toml::Value = toml::from_str(
-        read(&out.join("circuits/manifest.toml"))
-            .strip_prefix(MANIFEST_HEADER)
-            .unwrap_or_default(),
-    )
-    .unwrap_or_else(|e| fail(format!("manifest.toml: {e}")));
-    // label -> (version, pinned sha256)
-    let active: BTreeMap<&str, (&str, &str)> = manifest["circuit"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|c| c["status"].as_str() == Some("active"))
-        .filter_map(|c| {
-            Some((
-                c["label"].as_str()?,
-                (c["version"].as_str()?, c["bytecode_sha256"].as_str()?),
-            ))
+    let suffix = flags
+        .get("--version")
+        .map_or(String::new(), |v| format!("@{v}"));
+    let text = read(&out.join("circuits/manifest.toml"));
+    let doc: DocumentMut = text
+        .strip_prefix(MANIFEST_HEADER)
+        .unwrap_or(&text)
+        .parse()
+        .unwrap_or_else(|e| fail(format!("manifest.toml: {e}")));
+    let entries: &ArrayOfTables = doc["circuit"]
+        .as_array_of_tables()
+        .unwrap_or_else(|| fail("manifest has no circuits"));
+    let active = |label: &str| {
+        entries.iter().find(|t| {
+            t.get("label").and_then(|v| v.as_str()) == Some(label)
+                && t.get("status").and_then(|v| v.as_str()) == Some("active")
         })
-        .collect();
+    };
+    let tree = std::fs::read(out.join("resources/vk-tree.json")).ok();
     let packs: toml::Table =
         toml::from_str(&read(&flag("--packs"))).unwrap_or_else(|e| fail(format!("packs: {e}")));
     std::fs::create_dir_all(&dest).unwrap_or_else(|e| fail(e));
     for (name, p) in &packs {
-        let files: Vec<(String, Vec<u8>)> = p["circuits"]
-            .as_array()
-            .unwrap_or_else(|| fail(format!("pack {name}: no circuits")))
-            .iter()
-            .map(|l| {
-                let label = l.as_str().unwrap_or_default();
-                let (version, sha) = active.get(label).unwrap_or_else(|| {
-                    fail(format!("pack {name}: {label} is not an active circuit"))
-                });
-                let asset = format!("{label}@{version}.b64");
-                let bytes = std::fs::read(assets.join(&asset))
-                    .unwrap_or_else(|e| fail(format!("{asset}: {e}")));
-                if hex::encode(Sha256::digest(&bytes)) != *sha {
-                    fail(format!("{asset}: does not match its pinned hash"));
-                }
-                (asset, bytes)
-            })
-            .collect();
-        let path = dest.join(format!("{name}.tar.gz"));
+        let Some(labels) = p.get("circuits").and_then(|c| c.as_array()) else {
+            continue;
+        };
+        let mut files: Vec<(String, Vec<u8>)> = vec![];
+        let mut subset = doc.clone();
+        let kept = subset["circuit"]
+            .as_array_of_tables_mut()
+            .unwrap_or_else(|| fail("manifest has no circuits"));
+        kept.clear();
+        for l in labels {
+            let label = l.as_str().unwrap_or_default();
+            let t = active(label)
+                .unwrap_or_else(|| fail(format!("pack {name}: {label} is not an active circuit")));
+            let version = t["version"].as_str().unwrap_or_default();
+            let asset = format!("{label}@{version}");
+            let bytecode = std::fs::read(assets.join(format!("{asset}.b64")))
+                .unwrap_or_else(|e| fail(format!("{asset}.b64: {e}")));
+            if Some(hex::encode(Sha256::digest(&bytecode)).as_str())
+                != t["bytecode_sha256"].as_str()
+            {
+                fail(format!("{asset}.b64: does not match its pinned hash"));
+            }
+            let res = out.join(format!("resources/circuits/{label}/{version}"));
+            let vk = std::fs::read(res.join("circuit.vk"))
+                .unwrap_or_else(|e| fail(format!("{asset}: circuit.vk: {e}")));
+            let abi = std::fs::read(res.join("abi.json"))
+                .unwrap_or_else(|e| fail(format!("{asset}: abi.json: {e}")));
+            files.push((format!("{asset}.b64"), bytecode));
+            files.push((format!("{asset}.vk"), vk));
+            files.push((format!("{asset}.abi.json"), abi));
+            kept.push(t.clone());
+        }
+        if let Some(tree) = &tree {
+            files.push(("vk-tree.json".into(), tree.clone()));
+        }
+        files.push((
+            "manifest.toml".into(),
+            format!("{MANIFEST_HEADER}{subset}").into_bytes(),
+        ));
+        let path = dest.join(format!("{name}{suffix}.tar.gz"));
         let file = std::fs::File::create(&path).unwrap_or_else(|e| fail(e));
         noir_zk_backend::pack::write_pack(&files, file).unwrap_or_else(|e| fail(e));
         println!(
             "noir-zk pack: {} ({} circuits)",
             path.display(),
-            files.len()
+            labels.len()
         );
     }
 }

@@ -97,13 +97,15 @@ A proof's public inputs are the `pub` parameters, then the `pub` return values. 
 
 ## Circuit packs
 
-A pack is a `.tar.gz` of bytecode assets that a prover fetches in one go. Fetching exactly one document's circuits would tell the host that document's configuration; a pack only tells it which pack. eid-circuits packs per country, plus a `common` pack.
+A pack is a self-contained `.tar.gz` of a group of circuits that a prover fetches in one go. Fetching exactly one document's circuits would tell the host that document's configuration; a pack only tells it which pack. eid-circuits packs by key family, plus a `common` pack.
 
 ```sh
-noir-zk pack --out rust/my-zk --assets target/release-assets --packs packs.toml --dest target/packs
+noir-zk pack --out rust/my-zk --assets target/release-assets --packs packs.toml --dest target/packs --version 0.3.0
 ```
 
-`packs.toml` maps each pack name to its labels (`[DE]` then `circuits = ["...", ...]`). Every asset is checked against the manifest's pin, and archives are deterministic: the same assets always give the same bytes. On the client, `pack::unpack` (feature `packs`) extracts a pack into a directory that `DirStore` reads, and `Frozen` checks every asset again. Unpacking accepts only plain `<label>@<version>.b64` files: no paths, directories or links.
+Each table of `packs.toml` with a `circuits = [labels]` list becomes `<name>@<version>.tar.gz`; other tables (a country map, say) are ignored. A pack holds, per circuit, `<label>@<version>.b64` (bytecode, checked against the manifest's pin while packing), `.vk` and `.abi.json`, plus `vk-tree.json` and a `manifest.toml` with just its circuits' entries. Archives are deterministic: the same inputs give the same bytes.
+
+On the client, `pack::unpack` (feature `packs`) extracts a pack into a directory that `DirStore` reads, and `Frozen` checks every asset again. Unpacking accepts only plain files with those names: no paths, directories or links.
 
 ## Runtime
 
