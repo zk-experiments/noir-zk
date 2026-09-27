@@ -494,7 +494,7 @@ pub fn generate_registry(dir: &Path) -> String {
     for (label, step) in &kernels_with_step {
         let marker = format!("{label}::{}", camel(label));
         let select = if apps.contains_key(step) {
-            format!("\n    /// Wraps the app `label` (chosen at runtime) with its `Prover.toml` inputs; fails unless it is an app this kernel folds.\n    pub fn select<'i>(label: &str, toml: &'i str) -> Result<noir_zk_core::Wrapped<'i, Self>, noir_zk_core::Error> {{\n        noir_zk_core::Wrapped::select::<Registry>(label, toml)\n    }}\n")
+            "\n    /// Wraps the app `label` (chosen at runtime) with its `Prover.toml` inputs; fails unless it is an app this kernel folds.\n    pub fn select<'i>(label: &str, toml: &'i str) -> Result<noir_zk_core::Wrapped<'i, Self>, noir_zk_core::Error> {\n        noir_zk_core::Wrapped::select::<Registry>(label, toml)\n    }\n".to_string()
         } else {
             String::new()
         };
