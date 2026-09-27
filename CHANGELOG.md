@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.2.1 - 2026-09-27
+#### Bug Fixes
+- (**docs**) describe noir-zk on its own terms - (de192bb) - Anton Velichko
+
+- - -
+
 ## v0.2.0 - 2026-09-27
 #### Features
 - (**cli**) pack writes a catalog of the packs - (e539e00) - Anton Velichko

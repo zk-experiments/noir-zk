@@ -926,7 +926,7 @@ dependencies = [
 
 [[package]]
 name = "noir-zk-backend"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "acir",
  "acvm",
@@ -947,7 +947,7 @@ dependencies = [
 
 [[package]]
 name = "noir-zk-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ark-bn254",
  "ark-ff",
@@ -963,7 +963,7 @@ dependencies = [
 
 [[package]]
 name = "noir-zk-codegen"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "hex",
  "serde_json",
@@ -973,7 +973,7 @@ dependencies = [
 
 [[package]]
 name = "noir-zk-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ark-bn254",
  "ark-ff",
@@ -981,7 +981,7 @@ dependencies = [
 
 [[package]]
 name = "noir-zk-fixtures"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "noir-zk-backend",
  "noir-zk-codegen",

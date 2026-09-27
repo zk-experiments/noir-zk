@@ -3,7 +3,7 @@ members = ["crates/noir-zk-core", "crates/noir-zk-codegen", "crates/noir-zk-back
 resolver = "2"
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 rust-version = "1.94"
 license = "MIT"
@@ -13,9 +13,9 @@ keywords = ["noir", "zk", "barretenberg", "chonk", "ultrahonk"]
 categories = ["cryptography"]
 
 [workspace.dependencies]
-noir-zk-core = { path = "crates/noir-zk-core", version = "=0.2.0" }
-noir-zk-codegen = { path = "crates/noir-zk-codegen", version = "=0.2.0" }
-noir-zk-backend = { path = "crates/noir-zk-backend", version = "=0.2.0" }
+noir-zk-core = { path = "crates/noir-zk-core", version = "=0.2.1" }
+noir-zk-codegen = { path = "crates/noir-zk-codegen", version = "=0.2.1" }
+noir-zk-backend = { path = "crates/noir-zk-backend", version = "=0.2.1" }
 ark-ff = { version = "0.6", default-features = false }
 ark-bn254 = { version = "0.6", default-features = false, features = ["curve"] }
 base64 = "0.22"
