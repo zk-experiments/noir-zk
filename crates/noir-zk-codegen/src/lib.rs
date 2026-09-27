@@ -24,6 +24,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 fn camel(s: &str) -> String {
     s.split('_')
@@ -464,6 +465,20 @@ pub fn generate_registry(dir: &Path) -> String {
             ),
             _ => ("None".into(), String::new()),
         };
+        // The key's pin: recorded by freeze, and it must be the embedded key's.
+        let vk_file = dir.join(&rel).join("circuit.vk");
+        let vk_hash = hex::encode(Sha256::digest(
+            std::fs::read(&vk_file).unwrap_or_else(|e| panic!("{}: {e}", vk_file.display())),
+        ));
+        let recorded = c
+            .get("vk_sha256")
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| panic!("{label}@{version}: no vk_sha256 (rerun noir-zk freeze)"));
+        assert_eq!(
+            recorded, vk_hash,
+            "{label}@{version}: vk_sha256 doesn't match circuit.vk"
+        );
+        let vk_sha = hex32(&vk_hash);
         let status_v = match status {
             "active" => "Active",
             "deprecated" => "Deprecated",
@@ -471,7 +486,7 @@ pub fn generate_registry(dir: &Path) -> String {
         };
         writeln!(
             registry,
-            "    noir_zk_core::RegistryEntry {{\n        label: {label:?},\n        version: {version:?},\n        system: {system},\n        status: noir_zk_core::Status::{status_v},\n        bytecode_sha256: {},\n        abi: {},\n        vk: include_bytes!({}),\n        vk_index: {index},\n        vk_siblings: &[{siblings}],\n    }},",
+            "    noir_zk_core::RegistryEntry {{\n        label: {label:?},\n        version: {version:?},\n        system: {system},\n        status: noir_zk_core::Status::{status_v},\n        bytecode_sha256: {},\n        vk_sha256: {vk_sha},\n        abi: {},\n        vk: include_bytes!({}),\n        vk_index: {index},\n        vk_siblings: &[{siblings}],\n    }},",
             hex32(c["bytecode_sha256"].as_str().expect("bytecode_sha256")),
             if status == "active" { format!("Some(include_str!({}))", res("abi.json")) } else { "None".into() },
             res("circuit.vk"),
@@ -485,7 +500,7 @@ pub fn generate_registry(dir: &Path) -> String {
             serde_json::from_str(&std::fs::read_to_string(&abi_file).expect("abi.json"))
                 .expect("parse abi.json");
         let id = format!(
-            "        const LABEL: &'static str = {label:?};\n        const VERSION: &'static str = {version:?};\n        const SYSTEM: noir_zk_core::ProofSystem = {system};\n        const BYTECODE_SHA256: [u8; 32] = {};\n        const VK_BYTES: &'static [u8] = include_bytes!({});\n",
+            "        const LABEL: &'static str = {label:?};\n        const VERSION: &'static str = {version:?};\n        const SYSTEM: noir_zk_core::ProofSystem = {system};\n        const BYTECODE_SHA256: [u8; 32] = {};\n        const VK_BYTES: &'static [u8] = include_bytes!({});\n        const VK_SHA256: [u8; 32] = {vk_sha};\n",
             hex32(c["bytecode_sha256"].as_str().expect("sha")),
             res("circuit.vk"),
         );

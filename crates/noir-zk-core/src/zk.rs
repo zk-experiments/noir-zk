@@ -106,6 +106,9 @@ pub trait CircuitId {
     const BYTECODE_SHA256: [u8; 32];
     /// Verification key (bb's binary encoding, for [`CircuitId::SYSTEM`]).
     const VK_BYTES: &'static [u8];
+    /// SHA-256 of [`CircuitId::VK_BYTES`]: what a downloaded `.vk` file must
+    /// hash to.
+    const VK_SHA256: [u8; 32];
 }
 
 /// A proof-generation backend for circuit `C`.

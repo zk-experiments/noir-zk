@@ -68,6 +68,8 @@ Toolchain: Noir `1.0.0-rc.3` (the linked ACVM), Barretenberg `7.0.0-nightly.2026
 
 For typed inputs without freezing, `noir_zk_codegen::generate_types(&nargo_target_abis("target", |_| true)?)` works from any nargo output (`Inputs`, `Outputs` and `Circuit`; folding needs the frozen registry for the keys).
 
+The code carries the pins: every generated circuit has `BYTECODE_SHA256` and `VK_SHA256` (and the key itself, `VK_BYTES`), and `REGISTRY` lists both hashes for every version. freeze records them in the manifest; codegen fails the build if `vk_sha256` doesn't match the embedded key. So anything downloaded (a pack, a single asset) can be checked against the code, whatever host served it.
+
 Versioning is per circuit. A new circuit starts at `1.0.0`. Changed bytecode with the same ABI gets a patch bump. An ABI change is refused without `--abi-change`, which makes a minor bump. The superseded version is marked `deprecated` and loses its ABI but keeps its key and asset. Each derived key's Poseidon2 hash is checked against the tree before anything is written. `--check` writes nothing and fails if the registry is behind the compiled circuits.
 
 ## Proof systems
@@ -105,7 +107,7 @@ noir-zk pack --out rust/my-zk --assets target/release-assets --packs packs.toml 
 
 Each table of `packs.toml` with a `circuits = [labels]` list becomes `<name>@<version>.tar.gz`; other tables (a country map, say) are ignored. A pack holds, per circuit, `<label>@<version>.b64` (bytecode, checked against the manifest's pin while packing), `.vk` and `.abi.json`, plus `vk-tree.json` and a `manifest.toml` with just its circuits' entries. Archives are deterministic: the same inputs give the same bytes. `pack` also writes `catalog@<version>.json`, the index a client reads first: each pack's file, SHA-256 and size and its circuits, the Noir and bb versions, the key tree root, and the packs file's other tables (eid-circuits' country map) as they are. Check an archive's SHA-256 against the catalog before unpacking it.
 
-On the client, `pack::unpack` (feature `packs`) extracts a pack into a directory that `DirStore` reads, and `Frozen` checks every asset again. Unpacking accepts only plain files with those names: no paths, directories or links.
+On the client, `pack::unpack` (feature `packs`) extracts a pack into a directory that `DirStore` reads. `frozen::verify_dir(REGISTRY, dir)` checks every `.b64` and `.vk` file in it against the pins compiled into the bindings, and `Frozen` checks each bytecode again when it loads it. Unpacking accepts only plain files with those names: no paths, directories or links.
 
 ## Runtime
 

@@ -10,7 +10,8 @@
 //! - `resources/circuits/<label>/<version>/abi.json` and `circuit.vk` (the
 //!   verification key, derived through the FFI);
 //! - `circuits/manifest.toml`: one `[[circuit]]` per version with its proof
-//!   system, status and `bytecode_sha256`;
+//!   system, status, `bytecode_sha256` and `vk_sha256` (the pins a client
+//!   checks downloads against);
 //! - `resources/vk-tree.json`, checked leaf by leaf: the Poseidon2 hash of
 //!   each derived key must be the tree's;
 //! - `--assets`/`<label>@<version>.b64`: the bytecode, published as release
@@ -406,10 +407,14 @@ fn freeze(o: &Opts) {
     // Latest active entry per label: (index in the array, version, sha).
     let mut active: BTreeMap<String, (usize, String, String)> = BTreeMap::new();
     let mut recorded: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+    let mut vk_pins: BTreeMap<String, String> = BTreeMap::new();
     if let Some(arr) = doc.get("circuit").and_then(|c| c.as_array_of_tables()) {
         for (i, t) in arr.iter().enumerate() {
             if t.get("status").and_then(|s| s.as_str()) == Some("active") {
                 let label = t["label"].as_str().unwrap_or_default().to_string();
+                if let Some(pin) = t.get("vk_sha256").and_then(|v| v.as_str()) {
+                    vk_pins.insert(label.clone(), pin.to_string());
+                }
                 recorded.insert(
                     label.clone(),
                     ["system", "role", "oracle"]
@@ -433,7 +438,7 @@ fn freeze(o: &Opts) {
     }
 
     let (mut minted, mut failed) = (0usize, 0usize);
-    let mut new_entries: Vec<(String, String, ProofSystem, String)> = vec![];
+    let mut new_entries: Vec<(String, String, ProofSystem, String, String)> = vec![];
     let mut deprecate: Vec<usize> = vec![];
     for c in &compiled {
         let prev = active.get(&c.label);
@@ -458,6 +463,14 @@ fn freeze(o: &Opts) {
                     if committed != derived {
                         eprintln!(
                             "{}@{v}: committed key differs from the derived one",
+                            c.label
+                        );
+                        failed += 1;
+                    }
+                    let committed_sha = hex::encode(Sha256::digest(&committed));
+                    if vk_pins.get(&c.label) != Some(&committed_sha) {
+                        eprintln!(
+                            "{}@{v}: recorded vk_sha256 is missing or differs from the committed key",
                             c.label
                         );
                         failed += 1;
@@ -513,7 +526,13 @@ fn freeze(o: &Opts) {
         std::fs::create_dir_all(&dir).unwrap_or_else(|e| fail(e));
         std::fs::write(dir.join("abi.json"), format!("{}\n", c.abi)).unwrap_or_else(|e| fail(e));
         std::fs::write(dir.join("circuit.vk"), &vk).unwrap_or_else(|e| fail(e));
-        new_entries.push((c.label.clone(), version, c.system, c.sha.clone()));
+        new_entries.push((
+            c.label.clone(),
+            version,
+            c.system,
+            c.sha.clone(),
+            hex::encode(Sha256::digest(&vk)),
+        ));
         minted += 1;
     }
     if check {
@@ -545,7 +564,21 @@ fn freeze(o: &Opts) {
             t["status"] = value("deprecated");
         }
     }
-    for (label, version, system, sha) in new_entries {
+    // Every version records its key's hash (entries frozen before it did get
+    // it from their committed key).
+    for t in arr.iter_mut() {
+        if t.get("vk_sha256").is_none() {
+            let (label, version) = (
+                t["label"].as_str().unwrap_or_default().to_string(),
+                t["version"].as_str().unwrap_or_default().to_string(),
+            );
+            let vk =
+                std::fs::read(out.join(format!("resources/circuits/{label}/{version}/circuit.vk")))
+                    .unwrap_or_else(|e| fail(format!("{label}@{version}: circuit.vk: {e}")));
+            t["vk_sha256"] = value(hex::encode(Sha256::digest(&vk)));
+        }
+    }
+    for (label, version, system, sha, vk_sha) in new_entries {
         let mut t = Table::new();
         t["label"] = value(label);
         t["version"] = value(version);
@@ -554,6 +587,7 @@ fn freeze(o: &Opts) {
         }
         t["status"] = value("active");
         t["bytecode_sha256"] = value(sha);
+        t["vk_sha256"] = value(vk_sha);
         arr.push(t);
     }
     std::fs::create_dir_all(manifest_path.parent().unwrap_or(out)).unwrap_or_else(|e| fail(e));

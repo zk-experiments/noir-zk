@@ -100,6 +100,53 @@ impl<S: ArtifactStore> Artifacts for Frozen<S> {
     }
 }
 
+/// Checks a directory of downloaded circuit files (an unpacked pack) against
+/// the pins compiled into `registry`: every `<label>@<version>.b64` must hash
+/// to its `bytecode_sha256` and every `<label>@<version>.vk` to its
+/// `vk_sha256`. Other files (ABIs, `manifest.toml`, `vk-tree.json`) are
+/// ignored: the registry embeds its own. Returns how many files it checked;
+/// a file of a version the registry doesn't know is an error.
+pub fn verify_dir(registry: &[RegistryEntry], dir: &std::path::Path) -> Result<usize, Error> {
+    let mut checked = 0;
+    let entries =
+        std::fs::read_dir(dir).map_err(|e| Error::Artifact(format!("{}: {e}", dir.display())))?;
+    for entry in entries {
+        let path = entry
+            .map_err(|e| Error::Artifact(format!("{}: {e}", dir.display())))?
+            .path();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        let (stem, pin_of): (&str, fn(&RegistryEntry) -> [u8; 32]) =
+            if let Some(stem) = name.strip_suffix(".b64") {
+                (stem, |e| e.bytecode_sha256)
+            } else if let Some(stem) = name.strip_suffix(".vk") {
+                (stem, |e| e.vk_sha256)
+            } else {
+                continue;
+            };
+        let entry = stem
+            .split_once('@')
+            .and_then(|(label, version)| {
+                registry
+                    .iter()
+                    .find(|e| e.label == label && e.version == version)
+            })
+            .ok_or_else(|| {
+                Error::Artifact(format!("{name}: not a circuit version of this registry"))
+            })?;
+        let bytes = std::fs::read(&path).map_err(|e| Error::Artifact(format!("{name}: {e}")))?;
+        if Sha256::digest(&bytes).as_slice() != pin_of(entry) {
+            return Err(Error::Artifact(format!(
+                "{name}: does not match its pinned hash"
+            )));
+        }
+        checked += 1;
+    }
+    Ok(checked)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,11 +169,32 @@ mod tests {
             system: ProofSystem::Chonk(ChonkRole::App),
             status: Status::Active,
             bytecode_sha256: sha,
+            vk_sha256: [0; 32],
             abi: None,
             vk: &[],
             vk_index: None,
             vk_siblings: &[],
         }]))
+    }
+
+    #[test]
+    fn verify_dir_checks_bytecode_and_keys() {
+        const VK: &[u8] = b"key";
+        let mut e = registry()[0];
+        e.vk_sha256 = Sha256::digest(VK).into();
+        let reg: &'static [RegistryEntry] = Box::leak(Box::new([e]));
+        let dir = std::env::temp_dir().join(format!("noir-zk-verify-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("c@1.0.0.b64"), BYTECODE).unwrap();
+        std::fs::write(dir.join("c@1.0.0.vk"), VK).unwrap();
+        std::fs::write(dir.join("c@1.0.0.abi.json"), b"{}").unwrap();
+        assert_eq!(verify_dir(reg, &dir).unwrap(), 2);
+        std::fs::write(dir.join("c@1.0.0.vk"), b"other").unwrap();
+        assert!(verify_dir(reg, &dir).is_err());
+        std::fs::write(dir.join("c@1.0.0.vk"), VK).unwrap();
+        std::fs::write(dir.join("d@1.0.0.b64"), BYTECODE).unwrap();
+        assert!(verify_dir(reg, &dir).is_err());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

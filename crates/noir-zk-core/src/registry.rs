@@ -25,6 +25,9 @@ pub struct RegistryEntry {
     pub status: Status,
     /// SHA-256 of the base64 bytecode (the release asset's content).
     pub bytecode_sha256: [u8; 32],
+    /// SHA-256 of the verification key ([`RegistryEntry::vk`], a pack's
+    /// `.vk` file).
+    pub vk_sha256: [u8; 32],
     /// nargo's ABI JSON (active versions only).
     pub abi: Option<&'static str>,
     /// Verification key.
