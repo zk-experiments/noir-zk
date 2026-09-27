@@ -1,5 +1,10 @@
 # noir-zk
 
+[![noir-zk-core](https://img.shields.io/crates/v/noir-zk-core?label=noir-zk-core)](https://crates.io/crates/noir-zk-core)
+[![noir-zk-codegen](https://img.shields.io/crates/v/noir-zk-codegen?label=noir-zk-codegen)](https://crates.io/crates/noir-zk-codegen)
+[![noir-zk-backend](https://img.shields.io/crates/v/noir-zk-backend?label=noir-zk-backend)](https://crates.io/crates/noir-zk-backend)
+[![noir-zk-cli](https://img.shields.io/crates/v/noir-zk-cli?label=noir-zk-cli)](https://crates.io/crates/noir-zk-cli)
+
 Tooling and a library for proving Noir circuits with barretenberg, in Rust: standalone UltraHonk proofs and Chonk folding. A circuit repository freezes its compiled circuits with the `noir-zk` CLI, generates typed bindings with `noir-zk-codegen` from its `build.rs`, and proves and verifies through `noir-zk-backend`. [eid-circuits](https://github.com/zk-experiments/eid-circuits) (crate `eid-circuits`) is the first consumer.
 
 Toolchain: Noir `1.0.0-rc.3` (the linked ACVM), Barretenberg `7.0.0-nightly.20260927` (linked through `barretenberg-rs`, no `bb` binary needed). Proofs from other bb versions do not verify.
@@ -20,7 +25,7 @@ Toolchain: Noir `1.0.0-rc.3` (the linked ACVM), Barretenberg `7.0.0-nightly.2026
 2. Freeze them into a bindings crate:
 
    ```sh
-   cargo install --locked --git https://github.com/zk-experiments/noir-zk noir-zk-cli
+   cargo install --locked noir-zk-cli
    noir-zk freeze --target target --out rust/my-zk --assets target/release-assets [--vk-tree vk-tree.json] [--exclude bench_]
    ```
 
@@ -29,12 +34,14 @@ Toolchain: Noir `1.0.0-rc.3` (the linked ACVM), Barretenberg `7.0.0-nightly.2026
 
    ```toml
    [dependencies]
-   noir-zk-core = { git = "https://github.com/zk-experiments/noir-zk" }
-   noir-zk-backend = { git = "https://github.com/zk-experiments/noir-zk" }
+   noir-zk-core = "0.2"
+   noir-zk-backend = "0.2"   # features: "http" (HttpStore), "packs" (circuit packs)
 
    [build-dependencies]
-   noir-zk-codegen = { git = "https://github.com/zk-experiments/noir-zk" }
+   noir-zk-codegen = "0.2"
    ```
+
+   Keep the three on one version: they pin each other exactly.
 
    ```rust
    // build.rs
