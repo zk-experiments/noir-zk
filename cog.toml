@@ -7,6 +7,7 @@ generate_mono_repository_global_tag = false
 # `0,/RE/` range rewrites only its first `^version` line.
 pre_bump_hooks = [
     "sed -i '0,/^version/{s/^version.*/version = \"{{version}}\"/}' Cargo.toml",
+    "sed -i '/^noir-zk-[a-z]* = { path/ s/version = \"=[^\"]*\"/version = \"={{version}}\"/' Cargo.toml",
     "cargo update --workspace --manifest-path Cargo.toml",
 ]
 
