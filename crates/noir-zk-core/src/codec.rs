@@ -269,7 +269,6 @@ impl<T: FromFields, const N: usize> FromFields for [T; N] {
     const FIELDS: usize = N * T::FIELDS;
     fn read(r: &mut FieldReader<'_>) -> Result<Self, Error> {
         let v = (0..N).map(|_| T::read(r)).collect::<Result<Vec<T>, _>>()?;
-        v.try_into()
-            .map_err(|_| Error::Abi("array length".into()))
+        v.try_into().map_err(|_| Error::Abi("array length".into()))
     }
 }

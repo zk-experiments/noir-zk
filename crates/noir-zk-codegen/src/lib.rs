@@ -115,7 +115,9 @@ impl Types {
 /// A struct with public fields and its `FromFields` impl (fields read in
 /// declaration order, which is ABI order).
 fn struct_def(name: &str, doc: &str, fields: &[(String, String)]) -> String {
-    let mut def = format!("    /// {doc}\n    #[derive(Clone, Debug, PartialEq, Eq)]\n    pub struct {name} {{\n");
+    let mut def = format!(
+        "    /// {doc}\n    #[derive(Clone, Debug, PartialEq, Eq)]\n    pub struct {name} {{\n"
+    );
     for (f, t) in fields {
         writeln!(def, "        pub {f}: {t},").ok();
     }
@@ -295,7 +297,10 @@ fn circuit_module(label: &str, abi: &Value, doc: &str, identity: Option<(&str, &
         if kind == "App" {
             writeln!(code, "\n    impl noir_zk_core::App for {marker} {{}}").ok();
         } else {
-            assert!(is_kernel(abi), "{label}: a kernel's parameters must be among {KERNEL_PARAMS:?}");
+            assert!(
+                is_kernel(abi),
+                "{label}: a kernel's parameters must be among {KERNEL_PARAMS:?}"
+            );
             let ty = |n: &str| {
                 fields
                     .iter()
@@ -456,10 +461,19 @@ pub fn generate_registry(dir: &Path) -> String {
     code.push_str(&registry);
     code.push_str("\n/// Static dispatch from an app label to its circuit type (`noir_zk_core::AppDispatch`).\npub struct Registry;\n");
     for labels in apps.values() {
-        let out = format!("<{}::{} as noir_zk_core::Circuit>::Outputs", labels[0], camel(&labels[0]));
+        let out = format!(
+            "<{}::{} as noir_zk_core::Circuit>::Outputs",
+            labels[0],
+            camel(&labels[0])
+        );
         let arms: String = labels
             .iter()
-            .map(|l| format!("            {l:?} => Some(v.visit::<{l}::{}>()),\n", camel(l)))
+            .map(|l| {
+                format!(
+                    "            {l:?} => Some(v.visit::<{l}::{}>()),\n",
+                    camel(l)
+                )
+            })
             .collect();
         writeln!(
             code,
