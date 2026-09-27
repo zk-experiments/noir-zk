@@ -1,0 +1,20 @@
+# Toolchain pins for noir-zk.
+
+[env]
+# The Noir release whose ACVM (Cargo.toml's noir crates) solves witnesses:
+# circuits must be compiled with this nargo.
+NOIR_VERSION = "1.0.0-rc.3"
+# Barretenberg: must equal the barretenberg-rs version in Cargo.toml (the CLI
+# records it in each manifest). A bump changes every verification key and the
+# proof format, so consumers re-freeze every circuit.
+BB_VERSION = "7.0.0-nightly.20260927"
+
+[tasks."fixtures"]
+description = "Recompile and refreeze the test fixtures (crates/noir-zk-fixtures) with nargo $NOIR_VERSION"
+shell = "bash -c"
+run = '''
+set -euo pipefail
+f=crates/noir-zk-fixtures
+(cd $f/noir && "$HOME/.toolchains/noir-$NOIR_VERSION/bin/nargo" compile --workspace)
+cargo run -q --release -p noir-zk-cli -- freeze --target $f/noir/target --out $f --assets $f/assets
+'''

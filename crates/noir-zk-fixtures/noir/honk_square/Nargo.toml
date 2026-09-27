@@ -1,0 +1,6 @@
+[package]
+name = "honk_square"
+type = "bin"
+authors = [""]
+
+[dependencies]

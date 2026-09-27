@@ -1,0 +1,20 @@
+tag_prefix = "v"
+branch_whitelist = ["main"]
+ignore_merge_commits = true
+generate_mono_repository_global_tag = false
+
+# The repository version lives in Cargo.toml [workspace.package]; the
+# `0,/RE/` range rewrites only its first `^version` line.
+pre_bump_hooks = [
+    "sed -i '0,/^version/{s/^version.*/version = \"{{version}}\"/}' Cargo.toml",
+    "cargo update --workspace --manifest-path Cargo.toml",
+]
+
+post_bump_hooks = [
+    "git push origin HEAD:main",
+    "git push origin v{{version}}",
+]
+
+[changelog]
+path = "CHANGELOG.md"
+authors = []

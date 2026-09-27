@@ -1,0 +1,34 @@
+[package]
+name = "noir-zk-backend"
+description = "Proving backend for Noir circuits: ACVM witness solving, barretenberg Chonk folding (prove / verify) via FFI, and hash-checked frozen registries"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+noir-zk-core.workspace = true
+acir.workspace = true
+acvm.workspace = true
+bn254_blackbox_solver.workspace = true
+noirc_abi.workspace = true
+barretenberg-rs.workspace = true
+ark-ff.workspace = true
+ark-bn254.workspace = true
+base64.workspace = true
+flate2.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+ureq = { version = "3", optional = true, default-features = false, features = ["rustls"] }
+
+[features]
+# Fetch release-asset bytecode over HTTPS (servers, CLIs). Off for mobile and
+# verifier-only builds, which use a local store.
+http = ["dep:ureq"]
+
+[lints]
+workspace = true

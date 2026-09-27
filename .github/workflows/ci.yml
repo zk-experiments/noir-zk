@@ -1,0 +1,216 @@
+# CI + release for noir-zk (same shape as eid-circuits and csca-registry).
+#
+#   rust ──────────┐
+#   typos ─────────┼─> ci ──> tag (cog, push:main) ──> github-release
+#   supply-chain ──┘
+#
+# CI never proves: end-to-end proving tests live with the circuits
+# (the `eid-circuits` crate).
+#
+# Triggers
+#   push:main         full pipeline incl. cog auto-bump and, when cog tagged, release
+#   push:tags:["v*"]  release-only path against the named tag
+#   pull_request      checks + commitlint (any base branch, so stacked PRs are checked)
+#   schedule          nightly supply-chain (fresh advisories)
+#   workflow_dispatch maintainer-named (re-)release; empty `tag` runs the main pipeline
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  # Every pull request, including ones stacked on another feature branch.
+  pull_request:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: >-
+          Existing tag to (re-)release (e.g. "v0.2.0"). Empty input runs the
+          normal main pipeline.
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  resolve:
+    name: Resolve release tag
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.r.outputs.release_tag }}
+    steps:
+      - id: r
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag=""
+          case "$EVENT" in
+            push)
+              if [[ "$REF" == refs/tags/v* ]]; then
+                tag="$REF_NAME"
+              fi
+              ;;
+            workflow_dispatch)
+              tag="$INPUT_TAG"
+              ;;
+          esac
+          echo "release_tag=${tag}"
+          echo "release_tag=${tag}" >> "$GITHUB_OUTPUT"
+
+  commitlint:
+    name: Commit lint (conventional-commits)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: wagoid/commitlint-github-action@v6
+
+  rust:
+    name: Rust (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    needs: [resolve]
+    if: needs.resolve.outputs.release_tag == '' && github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+      # barretenberg-rs links bb's static library against libc++.
+      - name: Install libc++
+        run: sudo apt-get update -q && sudo apt-get install -yq libc++-dev libc++abi-dev
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: clippy (pso-poseidon code-smell set)
+        run: |
+          cargo clippy --all-targets --all-features -- -D warnings \
+            -D clippy::dbg_macro -D clippy::print_stdout -D clippy::print_stderr \
+            -D clippy::todo -D clippy::unimplemented -D clippy::exit \
+            -D clippy::cast_lossless -D clippy::cast_possible_truncation \
+            -D clippy::cast_possible_wrap -D clippy::cast_precision_loss \
+            -D clippy::cast_sign_loss -D clippy::clone_on_ref_ptr \
+            -D clippy::empty_enums -D clippy::enum_glob_use -D clippy::if_not_else \
+            -D clippy::mut_mut -D clippy::non_ascii_literal -D clippy::single_match_else \
+            -D clippy::string_add -D clippy::string_add_assign \
+            -D clippy::string_lit_as_bytes -D clippy::unnecessary_unwrap \
+            -D clippy::unused_self -D clippy::useless_let_if_seq \
+            -A clippy::module_name_repetitions -A clippy::must_use_candidate \
+            -A clippy::missing_errors_doc -A clippy::missing_panics_doc \
+            -A clippy::too_many_lines -A clippy::similar_names -A clippy::inline_always \
+            -A clippy::unwrap_used -A clippy::expect_used -A clippy::panic
+      - name: cargo test
+        run: cargo test --all-features
+
+  typos:
+    name: typos
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: crate-ci/typos@v1.50.2
+        with:
+          config: ./typos.toml
+
+  supply-chain:
+    name: supply chain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny,cargo-audit
+      - name: cargo deny
+        run: cargo deny --all-features check all
+      - name: cargo audit
+        run: cargo audit
+
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [rust, typos, supply-chain]
+    steps:
+      - name: Check dependency results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          if echo "$RESULTS" | jq -e 'any(.[]; .result == "failure" or .result == "cancelled")' > /dev/null; then
+            echo "::error::one or more required jobs did not succeed"
+            exit 1
+          fi
+
+  # always() + an explicit ci check: a skipped ancestor (commitlint on push)
+  # would otherwise skip this job and every release after it.
+  tag:
+    name: Bump version & tag
+    runs-on: ubuntu-latest
+    needs: [resolve, ci]
+    if: |
+      always() &&
+      needs.ci.result == 'success' &&
+      needs.resolve.outputs.release_tag == '' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      !startsWith(github.event.head_commit.message, 'chore(version):') &&
+      !contains(github.event.head_commit.message, '[skip ci]')
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Cocogitto bump
+        uses: cocogitto/cocogitto-action@v4
+        with:
+          command: bump
+          args: --auto
+          git-user: "github-actions[bot]"
+          git-user-email: "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Resolve created tag (if any)
+        id: bump
+        run: |
+          set -euo pipefail
+          tag="$(git tag --points-at HEAD | grep '^v' | head -n1 || true)"
+          echo "tag=${tag}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+  github-release:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    needs: [resolve, tag]
+    if: |
+      always() &&
+      ((needs.tag.result == 'success' && needs.tag.outputs.tag != '') ||
+       needs.resolve.outputs.release_tag != '')
+    steps:
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.tag.outputs.tag || needs.resolve.outputs.release_tag }}
+          name: ${{ needs.tag.outputs.tag || needs.resolve.outputs.release_tag }}
+          generate_release_notes: true

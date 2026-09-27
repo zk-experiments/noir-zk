@@ -1,0 +1,12 @@
+# Written by noir-zk freeze; do not edit.
+
+noir = "1.0.0-rc.3"
+bb = "7.0.0-nightly.20260927"
+
+[[circuit]]
+label = "honk_square"
+version = "1.0.0"
+system = "ultra_honk"
+oracle = "poseidon2"
+status = "active"
+bytecode_sha256 = "4a3017a2204b5d90d6e2a2f417963dbc20d6000f067152ab0bd439c6cf40b6fd"
