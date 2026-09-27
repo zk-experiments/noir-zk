@@ -3,6 +3,7 @@
 //! provers and verifiers are parameterised by the circuit so they agree on
 //! both types.
 
+use crate::codec::FromFields;
 use crate::error::Error;
 
 /// The field every circuit is compiled over (BN254 scalar field).
@@ -11,8 +12,8 @@ pub type Field = ark_bn254::Fr;
 /// A circuit: the binding between the private *witness* and the *public
 /// inputs* (the claim). The prover supplies both.
 pub trait Circuit {
-    /// The private inputs the circuit constrains.
-    type Witness;
+    /// The private inputs the circuit constrains (every `main` parameter).
+    type Witness: FromFields;
     /// The public inputs (the claim) the circuit exposes.
     type PublicInputs;
 
@@ -24,6 +25,14 @@ pub trait Circuit {
     /// order, structs and arrays expanded) as field elements in ACIR
     /// witness-index order: element `i` is ACIR `Witness(i)`.
     fn witness_inputs(witness: &Self::Witness, public: &Self::PublicInputs) -> Vec<Field>;
+
+    /// What `main` returns (through the databus, or public for a hiding
+    /// kernel), typed.
+    type Outputs: FromFields;
+    /// Position of a top-level `vk_tree_root` among the returned fields: the
+    /// key tree a hiding kernel's proof was folded under (the noir-zk kernel
+    /// convention), which verifiers must check.
+    const VK_TREE_ROOT_OUTPUT: Option<usize> = None;
 }
 
 /// How Chonk folds a circuit (`bb write_vk --circuit_kind`).

@@ -9,11 +9,13 @@
 pub mod artifacts;
 pub mod codec;
 pub mod error;
+pub mod fold;
 pub mod registry;
 pub mod zk;
 
 pub use artifacts::{Artifacts, VkPath};
-pub use codec::{FieldElement, FieldEncode};
+pub use codec::{from_fields, FieldElement, FieldEncode, FieldReader, FromFields};
 pub use error::Error;
+pub use fold::{App, AppDispatch, AppVisitor, Kernel, KernelInputs, VkInput};
 pub use registry::{RegistryEntry, Status};
 pub use zk::{Circuit, CircuitId, CircuitKind, Field, ProofGenerator, ProofVerifier};

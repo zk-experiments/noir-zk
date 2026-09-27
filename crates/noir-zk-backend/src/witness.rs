@@ -95,6 +95,19 @@ impl Program {
             .map_err(|e| Error::Abi(format!("{}: {e}", self.name)))
     }
 
+    /// `Prover.toml` inputs as field elements in witness-index order (to
+    /// decode into a generated `Inputs` struct).
+    pub fn fields_from_toml(&self, toml: &str) -> Result<Vec<Field>, Error> {
+        let map = self.inputs_from_toml(toml)?;
+        (0..self.abi.field_count())
+            .map(|i| {
+                map.get(&Witness(i))
+                    .map(|f| f.into_repr())
+                    .ok_or_else(|| Error::Abi(format!("{}: input {i} missing", self.name)))
+            })
+            .collect()
+    }
+
     /// Inputs already flattened in witness-index order (`Circuit::witness_inputs`).
     pub fn inputs_from_fields(&self, fields: &[Field]) -> Result<WitnessMap<FieldElement>, Error> {
         let expected = self.abi.field_count() as usize;

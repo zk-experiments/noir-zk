@@ -108,6 +108,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reader_checks_ranges_and_length() {
+        let f = [Field::from(1u64), Field::from(300u64), Field::from(2u64)];
+        let mut r = FieldReader::new(&f);
+        assert!(r.boolean().unwrap());
+        assert!(r.uint::<u8>(8).is_err());
+        assert!(r.boolean().is_err());
+        assert!(r.field().is_err());
+        let mut r = FieldReader::new(&f);
+        r.field().unwrap();
+        assert_eq!(r.uint::<u16>(16).unwrap(), 300);
+        assert!(r.finish().is_err());
+    }
+
+    #[test]
     fn canonical_decode_rejects_the_modulus() {
         let p = Field::MODULUS.to_bytes_be();
         assert_eq!(
@@ -144,5 +158,118 @@ mod tests {
         let [lo, hi] = u256_limbs_be(&be);
         assert_eq!(lo, Field::from(7u64));
         assert_eq!(hi, Field::from(9u128 << 120));
+    }
+}
+
+/// Reads typed values off a flat field-element list (generated `Outputs`
+/// decoders use it), rejecting values out of their type's range.
+pub struct FieldReader<'a> {
+    fields: std::slice::Iter<'a, Field>,
+}
+
+impl<'a> FieldReader<'a> {
+    /// Reads `fields` from the start.
+    pub fn new(fields: &'a [Field]) -> Self {
+        Self {
+            fields: fields.iter(),
+        }
+    }
+
+    /// The next field element.
+    pub fn field(&mut self) -> Result<Field, Error> {
+        self.fields
+            .next()
+            .copied()
+            .ok_or_else(|| Error::Abi("too few returned fields".into()))
+    }
+
+    /// The next element as a boolean (0 or 1).
+    pub fn boolean(&mut self) -> Result<bool, Error> {
+        match self.uint::<u8>(1)? {
+            0 => Ok(false),
+            _ => Ok(true),
+        }
+    }
+
+    /// The next element as an unsigned integer of `bits` bits.
+    pub fn uint<T: TryFrom<u128>>(&mut self, bits: u32) -> Result<T, Error> {
+        let be = field_to_be_bytes32(&self.field()?);
+        let v = if be[..16].iter().any(|b| *b != 0) {
+            None
+        } else {
+            let mut lo = [0u8; 16];
+            lo.copy_from_slice(&be[16..]);
+            Some(u128::from_be_bytes(lo)).filter(|v| bits >= 128 || v >> bits == 0)
+        };
+        v.and_then(|v| T::try_from(v).ok())
+            .ok_or_else(|| Error::Abi(format!("returned value exceeds {bits} bits")))
+    }
+
+    /// Fails unless every field was read.
+    pub fn finish(mut self) -> Result<(), Error> {
+        match self.fields.next() {
+            None => Ok(()),
+            Some(_) => Err(Error::Abi("too many returned fields".into())),
+        }
+    }
+}
+
+/// A value decoded from field elements in ABI order (return values, witness
+/// structs). Implemented for fields, booleans, unsigned integers, arrays and
+/// every generated struct.
+pub trait FromFields: Sized {
+    /// Field elements the value spans.
+    const FIELDS: usize;
+    /// Reads the value off `r`.
+    fn read(r: &mut FieldReader<'_>) -> Result<Self, Error>;
+}
+
+/// Decodes exactly `fields` as a `T`.
+pub fn from_fields<T: FromFields>(fields: &[Field]) -> Result<T, Error> {
+    let mut r = FieldReader::new(fields);
+    let v = T::read(&mut r)?;
+    r.finish()?;
+    Ok(v)
+}
+
+impl FromFields for () {
+    const FIELDS: usize = 0;
+    fn read(_: &mut FieldReader<'_>) -> Result<Self, Error> {
+        Ok(())
+    }
+}
+
+impl FromFields for Field {
+    const FIELDS: usize = 1;
+    fn read(r: &mut FieldReader<'_>) -> Result<Self, Error> {
+        r.field()
+    }
+}
+
+impl FromFields for bool {
+    const FIELDS: usize = 1;
+    fn read(r: &mut FieldReader<'_>) -> Result<Self, Error> {
+        r.boolean()
+    }
+}
+
+macro_rules! uint_from_fields {
+    ($($t:ty),*) => {$(
+        impl FromFields for $t {
+            const FIELDS: usize = 1;
+            fn read(r: &mut FieldReader<'_>) -> Result<Self, Error> {
+                r.uint(<$t>::BITS)
+            }
+        }
+    )*};
+}
+uint_from_fields!(u8, u16, u32, u64, u128);
+
+impl<T: FromFields, const N: usize> FromFields for [T; N] {
+    const FIELDS: usize = N * T::FIELDS;
+    fn read(r: &mut FieldReader<'_>) -> Result<Self, Error> {
+        let v = (0..N).map(|_| T::read(r)).collect::<Result<Vec<T>, _>>()?;
+        v.try_into()
+            .map_err(|_| Error::Abi("array length".into()))
     }
 }
