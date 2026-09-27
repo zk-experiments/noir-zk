@@ -1,0 +1,22 @@
+[package]
+name = "xtask"
+description = "Release tooling: freeze-circuits, the only step that reads compiled circuits and derives their keys"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+noir-zk-core.workspace = true
+noir-zk-backend = { path = "../crates/noir-zk-backend" }
+ark-ff.workspace = true
+ark-bn254.workspace = true
+hex.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+toml_edit.workspace = true
+pso-poseidon = "0.5"
+
+[lints]
+workspace = true

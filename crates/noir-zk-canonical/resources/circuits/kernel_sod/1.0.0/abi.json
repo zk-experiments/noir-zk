@@ -1,0 +1,141 @@
+{
+  "abi_version": 1,
+  "error_types": {
+    "10434854402947706107": {
+      "error_kind": "string",
+      "string": "verification key is not in the key tree under its role"
+    },
+    "11953012885757083777": {
+      "error_kind": "string",
+      "string": "SOD step does not continue the DSC step"
+    },
+    "6246863545673635001": {
+      "error_kind": "string",
+      "string": "Field failed to decompose into specified 9 limbs"
+    }
+  },
+  "parameters": [
+    {
+      "name": "prev",
+      "type": {
+        "kind": "array",
+        "length": 26,
+        "type": {
+          "kind": "field"
+        }
+      },
+      "visibility": "databus"
+    },
+    {
+      "name": "step",
+      "type": {
+        "kind": "array",
+        "length": 3,
+        "type": {
+          "kind": "field"
+        }
+      },
+      "visibility": "databus"
+    },
+    {
+      "name": "prev_vk",
+      "type": {
+        "fields": [
+          {
+            "name": "key",
+            "type": {
+              "kind": "array",
+              "length": 151,
+              "type": {
+                "kind": "field"
+              }
+            }
+          },
+          {
+            "name": "path",
+            "type": {
+              "fields": [
+                {
+                  "name": "index",
+                  "type": {
+                    "kind": "field"
+                  }
+                },
+                {
+                  "name": "siblings",
+                  "type": {
+                    "kind": "array",
+                    "length": 9,
+                    "type": {
+                      "kind": "field"
+                    }
+                  }
+                }
+              ],
+              "kind": "struct",
+              "path": "eid_kernel::csca_registry::MerklePath"
+            }
+          }
+        ],
+        "kind": "struct",
+        "path": "eid_kernel::Vk"
+      },
+      "visibility": "private"
+    },
+    {
+      "name": "step_vk",
+      "type": {
+        "fields": [
+          {
+            "name": "key",
+            "type": {
+              "kind": "array",
+              "length": 151,
+              "type": {
+                "kind": "field"
+              }
+            }
+          },
+          {
+            "name": "path",
+            "type": {
+              "fields": [
+                {
+                  "name": "index",
+                  "type": {
+                    "kind": "field"
+                  }
+                },
+                {
+                  "name": "siblings",
+                  "type": {
+                    "kind": "array",
+                    "length": 9,
+                    "type": {
+                      "kind": "field"
+                    }
+                  }
+                }
+              ],
+              "kind": "struct",
+              "path": "eid_kernel::csca_registry::MerklePath"
+            }
+          }
+        ],
+        "kind": "struct",
+        "path": "eid_kernel::Vk"
+      },
+      "visibility": "private"
+    }
+  ],
+  "return_type": {
+    "abi_type": {
+      "kind": "array",
+      "length": 26,
+      "type": {
+        "kind": "field"
+      }
+    },
+    "visibility": "databus"
+  }
+}

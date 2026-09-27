@@ -1,0 +1,329 @@
+{
+  "abi_version": 1,
+  "error_types": {
+    "11019205087382408538": {
+      "error_kind": "string",
+      "string": "Field failed to decompose into specified 4 limbs"
+    },
+    "11396349846187561296": {
+      "error_kind": "string",
+      "string": "md_offset is not the start of an attribute"
+    },
+    "1177925989943577246": {
+      "error_kind": "string",
+      "string": "ECDSA signature mismatch"
+    },
+    "11896526628892152482": {
+      "error_kind": "string",
+      "string": "21-byte serial must start with 0x00"
+    },
+    "11908774887677672244": {
+      "error_kind": "string",
+      "string": "dates before 1970 are not supported"
+    },
+    "12000508754881109287": {
+      "error_kind": "string",
+      "string": "Time must be UTCTime or GeneralizedTime"
+    },
+    "12187686094861742592": {
+      "error_kind": "string",
+      "string": "invalid time of day"
+    },
+    "12469291177396340830": {
+      "error_kind": "string",
+      "string": "call to assert_max_bit_size"
+    },
+    "12587619861293618807": {
+      "error_kind": "string",
+      "string": "BIT STRING has unused bits"
+    },
+    "12594605309544224181": {
+      "error_kind": "string",
+      "string": "time digit expected"
+    },
+    "12838235707315098107": {
+      "error_kind": "string",
+      "string": "ECDSA R is the point at infinity"
+    },
+    "13225890357864630838": {
+      "error_kind": "string",
+      "string": "bytes past the DER length must be zero"
+    },
+    "13298438978398840540": {
+      "error_kind": "string",
+      "string": "serial must be 1 to 21 bytes"
+    },
+    "13515859243389485353": {
+      "error_kind": "string",
+      "string": "explicit curve prime does not match the circuit"
+    },
+    "13536884461323383255": {
+      "error_kind": "string",
+      "string": "non-minimal INTEGER"
+    },
+    "13951535127465875922": {
+      "error_kind": "string",
+      "string": "unexpected DER bytes"
+    },
+    "14320851680071140034": {
+      "error_kind": "fmtstring",
+      "item_types": [
+        {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 32
+        }
+      ],
+      "length": 56
+    },
+    "14358080614416615260": {
+      "error_kind": "string",
+      "string": "trailing bytes in FieldID"
+    },
+    "14990209321349310352": {
+      "error_kind": "string",
+      "string": "attempt to add with overflow"
+    },
+    "15756303856814134827": {
+      "error_kind": "string",
+      "string": "trailing bytes in the messageDigest attribute"
+    },
+    "15842666521170835894": {
+      "error_kind": "string",
+      "string": "signedAttrs has more attributes than supported"
+    },
+    "16431471497789672479": {
+      "error_kind": "string",
+      "string": "Index out of bounds"
+    },
+    "16624800106192287662": {
+      "error_kind": "string",
+      "string": "negative INTEGER"
+    },
+    "1733317821142304276": {
+      "error_kind": "string",
+      "string": "Field failed to decompose into specified 2 limbs"
+    },
+    "17376936072331336463": {
+      "error_kind": "string",
+      "string": "DER element exceeds its container"
+    },
+    "18070829219009227646": {
+      "error_kind": "string",
+      "string": "EC point must be uncompressed"
+    },
+    "18287357528562917927": {
+      "error_kind": "string",
+      "string": "Field failed to decompose into specified 15 limbs"
+    },
+    "1976428911386114426": {
+      "error_kind": "string",
+      "string": "invalid date"
+    },
+    "1998584279744703196": {
+      "error_kind": "string",
+      "string": "attempt to subtract with overflow"
+    },
+    "2423311199366192687": {
+      "error_kind": "string",
+      "string": "EC point must be uncompressed and full size"
+    },
+    "2722252718304916276": {
+      "error_kind": "string",
+      "string": "unsupported DER length form"
+    },
+    "2779601333998127949": {
+      "error_kind": "string",
+      "string": "unexpected DER tag"
+    },
+    "2873272782303767976": {
+      "error_kind": "string",
+      "string": "negative serial"
+    },
+    "3258925853268341003": {
+      "error_kind": "string",
+      "string": "trailing bytes after ECParameters"
+    },
+    "3524261102865357019": {
+      "error_kind": "string",
+      "string": "DER limit exceeds buffer"
+    },
+    "3598589694908955916": {
+      "error_kind": "string",
+      "string": "curve coefficient does not match the circuit"
+    },
+    "361444214588792908": {
+      "error_kind": "string",
+      "string": "attempt to multiply with overflow"
+    },
+    "3764081827918866159": {
+      "error_kind": "string",
+      "string": "UTCTime must be YYMMDDHHMMSSZ"
+    },
+    "4548957646717471651": {
+      "error_kind": "string",
+      "string": "GeneralizedTime must be YYYYMMDDHHMMSSZ"
+    },
+    "5421095327929394772": {
+      "error_kind": "string",
+      "string": "attempt to bit-shift with overflow"
+    },
+    "562384553409063018": {
+      "error_kind": "string",
+      "string": "messageDigest length is not a SHA digest size"
+    },
+    "5882215902165049928": {
+      "error_kind": "string",
+      "string": "curve coefficient has the wrong length"
+    },
+    "6171030291394590941": {
+      "error_kind": "string",
+      "string": "validity must hold exactly two times"
+    },
+    "6778714198866035318": {
+      "error_kind": "string",
+      "string": "messageDigest must have exactly one value"
+    },
+    "7005289962348203461": {
+      "error_kind": "string",
+      "string": "non-minimal DER length"
+    },
+    "7088695529644145876": {
+      "error_kind": "string",
+      "string": "Time must end in Z"
+    },
+    "7801354049349451993": {
+      "error_kind": "string",
+      "string": "trailing bytes in SubjectPublicKeyInfo"
+    },
+    "819864067177566446": {
+      "error_kind": "string",
+      "string": "Field failed to decompose into specified 8 limbs"
+    },
+    "8949310619226293565": {
+      "error_kind": "string",
+      "string": "empty INTEGER"
+    },
+    "9105791428863716400": {
+      "error_kind": "string",
+      "string": "trailing bytes after the curve OID"
+    },
+    "9142774929051909985": {
+      "error_kind": "string",
+      "string": "assert_is_not_equal fail"
+    },
+    "9915470328990038322": {
+      "error_kind": "string",
+      "string": "INTEGER does not fit"
+    }
+  },
+  "parameters": [
+    {
+      "name": "dsc_salt",
+      "type": {
+        "kind": "field"
+      },
+      "visibility": "private"
+    },
+    {
+      "name": "dsc_hash_id",
+      "type": {
+        "kind": "integer",
+        "sign": "unsigned",
+        "width": 8
+      },
+      "visibility": "private"
+    },
+    {
+      "name": "country",
+      "type": {
+        "kind": "array",
+        "length": 3,
+        "type": {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 8
+        }
+      },
+      "visibility": "private"
+    },
+    {
+      "name": "salt",
+      "type": {
+        "kind": "field"
+      },
+      "visibility": "private"
+    },
+    {
+      "name": "tbs",
+      "type": {
+        "kind": "array",
+        "length": 1200,
+        "type": {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 8
+        }
+      },
+      "visibility": "private"
+    },
+    {
+      "name": "attrs",
+      "type": {
+        "kind": "array",
+        "length": 256,
+        "type": {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 8
+        }
+      },
+      "visibility": "private"
+    },
+    {
+      "name": "md_offset",
+      "type": {
+        "kind": "integer",
+        "sign": "unsigned",
+        "width": 32
+      },
+      "visibility": "private"
+    },
+    {
+      "name": "r",
+      "type": {
+        "kind": "array",
+        "length": 32,
+        "type": {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 8
+        }
+      },
+      "visibility": "private"
+    },
+    {
+      "name": "s",
+      "type": {
+        "kind": "array",
+        "length": 32,
+        "type": {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 8
+        }
+      },
+      "visibility": "private"
+    }
+  ],
+  "return_type": {
+    "abi_type": {
+      "kind": "array",
+      "length": 3,
+      "type": {
+        "kind": "field"
+      }
+    },
+    "visibility": "databus"
+  }
+}

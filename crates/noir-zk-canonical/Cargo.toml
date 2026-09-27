@@ -1,0 +1,28 @@
+[package]
+name = "noir-zk-canonical"
+description = "The frozen eid-circuits circuits: generated typed inputs per circuit, their identities and Chonk verification keys, the verification key tree, and hash-checked bytecode loading"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+noir-zk-core.workspace = true
+ark-ff.workspace = true
+ark-bn254.workspace = true
+hex.workspace = true
+sha2.workspace = true
+ureq = { version = "3", optional = true, default-features = false, features = ["rustls"] }
+
+[build-dependencies]
+noir-zk-codegen.workspace = true
+
+[features]
+# Fetch release-asset bytecode over HTTPS (servers, CLIs). Off for mobile and
+# verifier-only builds, which use a local store.
+http = ["dep:ureq"]
+
+[lints]
+workspace = true
