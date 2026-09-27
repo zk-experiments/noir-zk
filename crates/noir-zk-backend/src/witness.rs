@@ -2,7 +2,7 @@
 //! the bytecode into the full witness a prover consumes, plus the circuit's
 //! return value (a step's databus outputs, which the next kernel reads).
 //!
-//! Ported from `pso-zk-backend`'s witness module. Inputs come either typed
+//! Inputs come either typed
 //! ([`Program::inputs_from_fields`], from a generated circuit type's
 //! `Circuit::witness_inputs`) or as `Prover.toml` text
 //! ([`Program::inputs_from_toml`]), encoded by the

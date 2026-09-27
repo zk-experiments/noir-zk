@@ -53,6 +53,6 @@ unwrap_used = "warn"
 # Witness solving and proving are unusably slow unoptimised. ACVM's solver
 # and Brillig VM are generic, so they are compiled into the calling crate:
 # optimising only dependencies isn't enough (measured on an RSA-4096 DSC step:
-# 1.3 s in dev without this, 0.17 s with it). Same as pso-zk-circuits.
+# 1.3 s in dev without this, 0.17 s with it).
 [profile.dev]
 opt-level = 3

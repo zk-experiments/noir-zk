@@ -1,6 +1,5 @@
 //! The one bb instance: bb's CRS and prover are process-global C++ state and
-//! not reentrant, so every call is serialised by one lock, as in psonet's
-//! backend.
+//! not reentrant, so every call is serialised by one lock.
 
 use std::sync::{Mutex, MutexGuard};
 

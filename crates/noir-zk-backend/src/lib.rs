@@ -1,7 +1,7 @@
 //! Proving backend for Noir circuits folded with barretenberg's Chonk.
 //!
 //! - [`abi`]: nargo ABIs: field counts and `Prover.toml` encoding.
-//! - [`witness`]: ACVM witness solving (ported from psonet's `pso-zk-backend`).
+//! - [`witness`]: ACVM witness solving.
 //! - [`chonk`]: Chonk folding over the FFI (`barretenberg-rs`): accumulate a
 //!   stack of circuits into one proof, verify it, derive keys.
 //! - [`fold`]: typed folding over generated circuit types (`Folding`, `verify`).

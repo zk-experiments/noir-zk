@@ -1,5 +1,4 @@
-//! Codec: how typed values fold into BN254 field elements and back, ported
-//! from `pso-protocol`'s field encoding.
+//! Codec: how typed values fold into BN254 field elements and back.
 //!
 //! Encoding is fallible: there is no total map from arbitrary 256-bit bytes
 //! onto the ~254-bit field, and silently reducing (`mod_order`) would alias

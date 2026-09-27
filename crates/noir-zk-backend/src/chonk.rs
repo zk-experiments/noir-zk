@@ -4,7 +4,7 @@
 //! A proof folds a stack of circuits (apps and the kernels that fold them)
 //! into one proof verified under the last (hiding) kernel's key. bb's CRS and
 //! prover are process-global C++ state and not reentrant, so every call is
-//! serialised by one lock, as in psonet's backend.
+//! serialised by one lock.
 
 use ark_ff::PrimeField;
 use barretenberg_rs::generated_types::{ChonkProof, CircuitInput, CircuitInputNoVK};
