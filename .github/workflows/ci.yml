@@ -99,7 +99,7 @@ jobs:
         run: sudo apt-get update -q && sudo apt-get install -yq libc++-dev libc++abi-dev
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
-      - name: clippy (pso-poseidon code-smell set)
+      - name: clippy (code-smell set)
         run: |
           cargo clippy --all-targets --all-features -- -D warnings \
             -D clippy::dbg_macro -D clippy::print_stdout -D clippy::print_stderr \

@@ -1,5 +1,5 @@
 //! `noir-zk freeze`: the only step that reads compiled circuits and derives
-//! their keys (ported from psonet's `pso-zk-circuits` xtask).
+//! their keys.
 //!
 //! Inputs: nargo's `target/` (`<label>.json` per circuit; `--exclude`
 //! prefixes skip some) and, for Chonk kernels, the Poseidon2 verification key

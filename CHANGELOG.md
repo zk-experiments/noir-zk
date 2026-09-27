@@ -18,7 +18,7 @@ All notable changes to this project will be documented in this file. See [conven
 #### Features
 - (**backend**) add witness solving and Chonk document proving and verification - (1b37d25) - Anton Velichko
 - (**canonical**) freeze circuits into a hash-pinned registry with generated types - (39786b6) - Anton Velichko
-- (**core**) port circuit traits and field codec from psonet - (5c96b94) - Anton Velichko
+- (**core**) add circuit traits and field codec - (5c96b94) - Anton Velichko
 - <span style="background-color: #d73a49; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold; font-size: 0.85em;">BREAKING</span>split proof systems into UltraHonk and Chonk - (abee160) - Anton Velichko
 - fold apps wrapped with their kernel - (0681581) - Anton Velichko
 - typed Chonk folding over generated circuit types - (581d3c2) - Anton Velichko

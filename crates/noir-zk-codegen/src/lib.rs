@@ -1,9 +1,8 @@
 //! Rust code generation for Noir circuits: typed inputs from nargo ABIs, and
 //! a frozen registry of circuit identities and Chonk verification keys.
 //!
-//! Ported from `pso-zk-canonical`'s build script and made reusable: a crate
-//! calls it from its `build.rs` (as a build-dependency) instead of carrying a
-//! copy of the generator.
+//! A crate calls it from its `build.rs` (as a build-dependency) instead of
+//! carrying its own generator.
 //!
 //! ```ignore
 //! // build.rs: typed inputs for a workspace's compiled circuits

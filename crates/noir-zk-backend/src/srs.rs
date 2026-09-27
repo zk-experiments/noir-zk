@@ -1,12 +1,12 @@
 //! The structured reference strings bb needs for Chonk: BN254 G1 points (for
 //! the circuits, up to 2^20 + 1 points) and Grumpkin points (for the ECCVM).
 //!
-//! Ported from `pso-zk-backend`'s SRS loader: points come from a local file
+//! Points come from a local file
 //! (an explicit path, `$BB_CRS_PATH`, or bb's own cache `~/.bb-crs`), and the
 //! exact prefix handed to bb is checked against a pinned SHA-256 first, so a
-//! poisoned cache can't seed a setup that accepts forged proofs. Unlike the
-//! psonet loader there is no network fallback: provision the files (bb
-//! downloads them on first use; a mobile app bundles them).
+//! poisoned cache can't seed a setup that accepts forged proofs. There is no
+//! network fallback: provision the files (bb downloads them on first use; a
+//! mobile app bundles them).
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -22,8 +22,7 @@ pub const BN254_POINTS: u32 = (1 << 20) + 1;
 /// Grumpkin points for the ECCVM.
 pub const GRUMPKIN_POINTS: u32 = 1 << 15;
 
-/// SHA-256 of the first `BN254_POINTS` points of Aztec's `g1.dat` (the same
-/// digest psonet pins).
+/// SHA-256 of the first `BN254_POINTS` points of Aztec's `g1.dat`.
 const BN254_SHA256: &str = "0f238856e55722f15a4d64ef0de12b4260e218245590bd3a6c900aee188de8e5";
 /// SHA-256 of the first `GRUMPKIN_POINTS` points of bb's `grumpkin_g1_v2.flat.dat`.
 const GRUMPKIN_SHA256: &str = "72b8cdad9da82b666987e5fe6f5a0804e3a9b5ba750aa5d451b514442fe157b2";
