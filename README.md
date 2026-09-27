@@ -34,6 +34,8 @@ let public = verify_document(&proof, hiding_vk(), vk_tree_root())?;
 
 The circuit labels come from the eid-circuits prover crate, which selects them from the NFC data. `verify_document` checks the proof, the key tree root and the output layout; the caller still checks the registry root, date, context, viewers and hash policy (eid-circuits `docs/VERIFY.md`).
 
+On Linux, `barretenberg-rs` needs libc++ (`apt install libc++-dev libc++abi-dev`).
+
 The SRS is loaded once from `$BB_CRS_PATH` or `~/.bb-crs`, with no network fallback, and checked against pinned SHA-256 digests. It needs the BN254 file with 2^20+1 points and the Grumpkin file `grumpkin_g1_v2.flat.dat` with 2^15 points. Override with `srs::set_srs_paths`.
 
 ## Verification parameters

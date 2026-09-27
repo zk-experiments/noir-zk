@@ -96,6 +96,9 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt, clippy
+      # barretenberg-rs links bb's static library against libc++.
+      - name: Install libc++
+        run: sudo apt-get update -q && sudo apt-get install -yq libc++-dev libc++abi-dev
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
       - name: clippy (pso-poseidon code-smell set)
