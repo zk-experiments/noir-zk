@@ -59,6 +59,9 @@ struct Opts {
     abi_change: bool,
 }
 
+/// First lines of every manifest freeze writes.
+const MANIFEST_HEADER: &str = "# Written by noir-zk freeze; do not edit.\n\n";
+
 const KERNEL_PARAMS: [&str; 5] = ["prev", "step", "prev_vk", "step_vk", "vk_tree_root"];
 
 /// The proof system a circuit's ABI calls for (see the module docs).
@@ -255,8 +258,10 @@ fn freeze(o: &Opts) {
     }
 
     let manifest_path = out.join("circuits/manifest.toml");
-    let mut doc: DocumentMut = std::fs::read_to_string(&manifest_path)
-        .unwrap_or_default()
+    let text = std::fs::read_to_string(&manifest_path).unwrap_or_default();
+    let mut doc: DocumentMut = text
+        .strip_prefix(MANIFEST_HEADER)
+        .unwrap_or(&text)
         .parse()
         .unwrap_or_else(|e| fail(format!("manifest.toml: {e}")));
     // Latest active entry per label: (index in the array, version, sha).
@@ -413,10 +418,18 @@ fn freeze(o: &Opts) {
         arr.push(t);
     }
     std::fs::create_dir_all(manifest_path.parent().unwrap_or(out)).unwrap_or_else(|e| fail(e));
-    std::fs::write(&manifest_path, doc.to_string()).unwrap_or_else(|e| fail(e));
-    if let Some(tree) = &o.vk_tree {
+    std::fs::write(&manifest_path, format!("{MANIFEST_HEADER}{doc}")).unwrap_or_else(|e| fail(e));
+    if let Some(path) = &o.vk_tree {
+        // The frozen copy is freeze's output, so it says so.
+        let mut tree = tree.clone();
+        tree["generated_by"] = serde_json::Value::String(format!(
+            "noir-zk freeze, from {}; do not edit",
+            path.display()
+        ));
+        let text = serde_json::to_string_pretty(&tree).unwrap_or_else(|e| fail(e));
         std::fs::create_dir_all(out.join("resources")).unwrap_or_else(|e| fail(e));
-        std::fs::write(out.join("resources/vk-tree.json"), read(tree)).unwrap_or_else(|e| fail(e));
+        std::fs::write(out.join("resources/vk-tree.json"), format!("{text}\n"))
+            .unwrap_or_else(|e| fail(e));
     }
 
     // Release assets: the bytecode of every active version.
