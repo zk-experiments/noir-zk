@@ -2,6 +2,18 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.2.0 - 2026-09-27
+#### Features
+- (**cli**) pack writes a catalog of the packs - (e539e00) - Anton Velichko
+- pin verification keys by hash, and verify downloaded files - (9be7066) - Anton Velichko
+- self-contained, versioned circuit packs - (ccd8b3c) - Anton Velichko
+- circuit packs - (3da99bc) - Anton Velichko
+- <span style="background-color: #d73a49; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold; font-size: 0.85em;">BREAKING</span>make noir-zk publishable on crates.io - (3494d6f) - Anton Velichko
+#### Continuous Integration
+- publish the crates to crates.io on release - (9f50168) - Anton Velichko
+
+- - -
+
 ## v0.1.0 - 2026-09-27
 #### Features
 - (**backend**) add witness solving and Chonk document proving and verification - (1b37d25) - Anton Velichko
