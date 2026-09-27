@@ -26,12 +26,15 @@ sha2.workspace = true
 hex.workspace = true
 toml.workspace = true
 
+tar = { workspace = true, optional = true }
 ureq = { version = "3", optional = true, default-features = false, features = ["rustls"] }
 
 [features]
 # Fetch release-asset bytecode over HTTPS (servers, CLIs). Off for mobile and
 # verifier-only builds, which use a local store.
 http = ["dep:ureq"]
+# Circuit packs (.tar.gz of assets): write and unpack them.
+packs = ["dep:tar"]
 
 [lints]
 workspace = true

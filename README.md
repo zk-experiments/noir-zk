@@ -95,6 +95,16 @@ let out: square::Outputs = outputs::<Square>(&proof)?;                          
 
 A proof's public inputs are the `pub` parameters, then the `pub` return values. `honk::vk_fields::<C>()` gives a key as fields for verifying it inside another circuit.
 
+## Circuit packs
+
+A pack is a `.tar.gz` of bytecode assets that a prover fetches in one go. Fetching exactly one document's circuits would tell the host that document's configuration; a pack only tells it which pack. eid-circuits packs per country, plus a `common` pack.
+
+```sh
+noir-zk pack --out rust/my-zk --assets target/release-assets --packs packs.toml --dest target/packs
+```
+
+`packs.toml` maps each pack name to its labels (`[DE]` then `circuits = ["...", ...]`). Every asset is checked against the manifest's pin, and archives are deterministic: the same assets always give the same bytes. On the client, `pack::unpack` (feature `packs`) extracts a pack into a directory that `DirStore` reads, and `Frozen` checks every asset again. Unpacking accepts only plain `<label>@<version>.b64` files: no paths, directories or links.
+
 ## Runtime
 
 On Linux, `barretenberg-rs` needs libc++ (`apt install libc++-dev libc++abi-dev`).
