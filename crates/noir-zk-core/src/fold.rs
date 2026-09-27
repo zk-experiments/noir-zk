@@ -65,9 +65,9 @@ impl<P, S> KernelInputs<P, S> {
 /// A kernel (Chonk kind `kernel`, or `hiding` for the last).
 pub trait Kernel: Circuit<PublicInputs = ()> + CircuitId {
     /// Type of its `prev` parameter, `()` if it has none.
-    type Prev;
+    type Prev: FromFields;
     /// Type of its `step` parameter, `()` if it has none.
-    type Step;
+    type Step: FromFields;
     /// Its witness, from what the backend supplies.
     fn witness(k: KernelInputs<Self::Prev, Self::Step>) -> Result<Self::Witness, Error>;
 }
@@ -89,4 +89,83 @@ pub trait AppDispatch<O> {
     /// Calls `v.visit::<C>()` for the active app labelled `label`, or `None`
     /// when no app with that output type has the label.
     fn visit_app<V: AppVisitor<O>>(label: &str, v: V) -> Option<V::Output>;
+}
+
+/// An app resolved to its circuit: identity, key and inputs.
+pub struct AppStep<'i> {
+    /// Circuit package name.
+    pub label: &'static str,
+    /// Its Chonk key.
+    pub vk: &'static [u8],
+    /// Its inputs.
+    pub inputs: StepInputs<'i>,
+}
+
+/// An app's inputs.
+pub enum StepInputs<'i> {
+    /// Witness fields from a typed `Inputs` struct.
+    Fields(Vec<Field>),
+    /// `Prover.toml` text. The backend encodes it with the ABI, and `check`
+    /// decodes that into the circuit's own `Inputs` type and flattens it back.
+    Toml {
+        /// The text.
+        toml: &'i str,
+        /// The circuit's decode-and-flatten (monomorphised per circuit).
+        check: fn(&[Field]) -> Result<Vec<Field>, Error>,
+    },
+}
+
+fn check<C: App>(fields: &[Field]) -> Result<Vec<Field>, Error> {
+    Ok(C::witness_inputs(
+        &crate::codec::from_fields::<C::Witness>(fields)?,
+        &(),
+    ))
+}
+
+/// An app wrapped with the kernel `K` that folds it: its outputs are
+/// `K::Step`, so wrapping type-checks the app against the kernel.
+pub struct Wrapped<'i, K> {
+    /// The app.
+    pub app: AppStep<'i>,
+    _kernel: std::marker::PhantomData<K>,
+}
+
+impl<'i, K: Kernel> Wrapped<'i, K> {
+    /// Wraps app `C` with its typed witness.
+    pub fn new<C: App<Outputs = K::Step>>(witness: &C::Witness) -> Self {
+        Self {
+            app: AppStep {
+                label: C::LABEL,
+                vk: C::VK_BYTES,
+                inputs: StepInputs::Fields(C::witness_inputs(witness, &())),
+            },
+            _kernel: std::marker::PhantomData,
+        }
+    }
+
+    /// Wraps the app labelled `label` (chosen at runtime) with its
+    /// `Prover.toml` inputs. `R` (a generated `Registry`) dispatches the label
+    /// statically to a circuit returning `K::Step`; any other label fails.
+    pub fn select<R: AppDispatch<K::Step>>(label: &str, toml: &'i str) -> Result<Self, Error> {
+        struct Resolve<'i>(&'i str);
+        impl<'i, O> AppVisitor<O> for Resolve<'i> {
+            type Output = AppStep<'i>;
+            fn visit<C: App<Outputs = O>>(self) -> AppStep<'i> {
+                AppStep {
+                    label: C::LABEL,
+                    vk: C::VK_BYTES,
+                    inputs: StepInputs::Toml {
+                        toml: self.0,
+                        check: check::<C>,
+                    },
+                }
+            }
+        }
+        let app = R::visit_app(label, Resolve(toml))
+            .ok_or_else(|| Error::Artifact(format!("{label} is not an app {} folds", K::LABEL)))?;
+        Ok(Self {
+            app,
+            _kernel: std::marker::PhantomData,
+        })
+    }
 }

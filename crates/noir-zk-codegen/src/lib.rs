@@ -389,6 +389,7 @@ pub fn generate_registry(dir: &Path) -> String {
     writeln!(code, "/// Root of the verification key tree the kernels check.\npub const VK_TREE_ROOT: [u8; 32] = {};\n", hex32(manifest["vk_tree_root"].as_str().expect("vk_tree_root"))).ok();
 
     let mut apps: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut kernels_with_step: Vec<(String, String)> = vec![];
     let mut registry = String::from(
         "/// Every frozen circuit version.\npub const REGISTRY: &[noir_zk_core::RegistryEntry] = &[\n",
     );
@@ -443,6 +444,14 @@ pub fn generate_registry(dir: &Path) -> String {
             &format!("`{label}` {version} ({kind})."),
             Some((&id, kind)),
         ));
+        if kind != "App" {
+            if let Some(step) = abi["parameters"]
+                .as_array()
+                .and_then(|ps| ps.iter().find(|p| p["name"] == "step"))
+            {
+                kernels_with_step.push((label.to_string(), step["type"].to_string()));
+            }
+        }
         if kind == "App" {
             // Apps returning the same type share a dispatch; a struct output
             // is its module's own type, so it dispatches alone.
@@ -478,6 +487,20 @@ pub fn generate_registry(dir: &Path) -> String {
         writeln!(
             code,
             "\nimpl noir_zk_core::AppDispatch<{out}> for Registry {{\n    fn visit_app<V: noir_zk_core::AppVisitor<{out}>>(label: &str, v: V) -> Option<V::Output> {{\n        match label {{\n{arms}            _ => None,\n        }}\n    }}\n}}"
+        )
+        .ok();
+    }
+    // Kernels that fold an app: wrap one, typed or chosen at runtime.
+    for (label, step) in &kernels_with_step {
+        let marker = format!("{label}::{}", camel(label));
+        let select = if apps.contains_key(step) {
+            format!("\n    /// Wraps the app `label` (chosen at runtime) with its `Prover.toml` inputs; fails unless it is an app this kernel folds.\n    pub fn select<'i>(label: &str, toml: &'i str) -> Result<noir_zk_core::Wrapped<'i, Self>, noir_zk_core::Error> {{\n        noir_zk_core::Wrapped::select::<Registry>(label, toml)\n    }}\n")
+        } else {
+            String::new()
+        };
+        writeln!(
+            code,
+            "\nimpl {marker} {{\n    /// Wraps app `C` (typed witness) to be folded by this kernel.\n    pub fn wrap<C: noir_zk_core::App<Outputs = <Self as noir_zk_core::Kernel>::Step>>(witness: &C::Witness) -> noir_zk_core::Wrapped<'static, Self> {{\n        noir_zk_core::Wrapped::new::<C>(witness)\n    }}\n{select}}}"
         )
         .ok();
     }

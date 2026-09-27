@@ -16,6 +16,8 @@ pub mod zk;
 pub use artifacts::{Artifacts, VkPath};
 pub use codec::{from_fields, FieldElement, FieldEncode, FieldReader, FromFields};
 pub use error::Error;
-pub use fold::{App, AppDispatch, AppVisitor, Kernel, KernelInputs, VkInput};
+pub use fold::{
+    App, AppDispatch, AppStep, AppVisitor, Kernel, KernelInputs, StepInputs, VkInput, Wrapped,
+};
 pub use registry::{RegistryEntry, Status};
 pub use zk::{Circuit, CircuitId, CircuitKind, Field, ProofGenerator, ProofVerifier};

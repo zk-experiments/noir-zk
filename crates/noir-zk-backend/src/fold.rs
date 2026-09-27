@@ -2,23 +2,23 @@
 //!
 //! ```ignore
 //! let (proof, out) = Folding::new(&artifacts)
-//!     .app::<Dsc>(&dsc_witness)?
-//!     .kernel::<KernelDsc>()?     // KernelDsc::Step must be Dsc::Outputs
-//!     .app::<Sod>(&sod_witness)?
-//!     .kernel::<KernelSod>()?     // Prev: KernelDsc::Outputs, Step: Sod::Outputs
-//!     .hiding::<KernelHiding>()?; // proves; `out: KernelHiding::Outputs`
+//!     .app(KernelDsc::wrap::<Dsc>(&dsc_inputs))?       // typed app, folded by KernelDsc
+//!     .app(KernelSod::select(sod_label, &sod_toml)?)?  // app chosen at runtime
+//!     .kernel::<KernelTail>()?                         // a kernel without an app
+//!     .hiding::<KernelHiding>()?;                      // proves; out: KernelHiding::Outputs
 //! let out = verify::<KernelHiding>(&proof, vk_tree_root)?;
 //! ```
 //!
-//! The chain type-checks at compile time: a kernel only follows the app and
-//! kernel whose outputs its `step` and `prev` parameters take. Kernel inputs
-//! (outputs, keys, key-tree paths, root) are filled by the builder
-//! (`noir_zk_core::fold`'s kernel convention).
+//! The chain type-checks at compile time: an app is wrapped with the kernel
+//! that folds it (its outputs must be the kernel's `Step`), and each kernel's
+//! `Prev` must be the previous kernel's outputs. Kernel inputs (outputs, keys,
+//! key-tree paths, root) are filled by the builder (`noir_zk_core::fold`'s
+//! kernel convention).
 
 use noir_zk_core::fold::VkInput;
 use noir_zk_core::{
-    from_fields, App, AppDispatch, AppVisitor, Artifacts, Circuit, CircuitId, CircuitKind, Error,
-    Field, FromFields, Kernel, KernelInputs,
+    from_fields, AppStep, Artifacts, Circuit, CircuitId, CircuitKind, Error, Field, FromFields,
+    Kernel, KernelInputs, StepInputs, Wrapped,
 };
 
 use crate::chonk::{self, FoldedProof, Step};
@@ -28,60 +28,59 @@ struct Solving {
     label: &'static str,
     kind: CircuitKind,
     program: Program,
-    vk: Vec<u8>,
+    vk: &'static [u8],
     solved: Solved,
 }
 
-/// A folding chain in progress: `P` is the last kernel's outputs, `S` the
-/// pending app's outputs (`()` when none).
-pub struct Folding<'a, A: Artifacts, P, S> {
+/// A folding chain in progress; `P` is the last kernel's outputs (`()`
+/// before the first kernel).
+pub struct Folding<'a, A: Artifacts, P> {
     artifacts: &'a A,
     circuits: Vec<Solving>,
     prev: P,
-    step: S,
     prev_label: Option<&'static str>,
-    step_label: Option<&'static str>,
 }
 
-impl<'a, A: Artifacts> Folding<'a, A, (), ()> {
+impl<'a, A: Artifacts> Folding<'a, A, ()> {
     /// An empty chain over `artifacts`.
     pub fn new(artifacts: &'a A) -> Self {
         Self {
             artifacts,
             circuits: vec![],
             prev: (),
-            step: (),
             prev_label: None,
-            step_label: None,
         }
     }
 }
 
-impl<'a, A: Artifacts, P, S> Folding<'a, A, P, S> {
-    fn solve<C: Circuit<PublicInputs = ()> + CircuitId>(
-        &mut self,
-        witness: &C::Witness,
-    ) -> Result<C::Outputs, Error> {
-        let program = self.program(C::LABEL)?;
-        let solved =
-            program.solve(program.inputs_from_fields(&C::witness_inputs(witness, &()))?)?;
-        let outputs = from_fields(&solved.outputs)?;
-        self.circuits.push(Solving {
-            label: C::LABEL,
-            kind: C::KIND,
-            program,
-            vk: C::VK_BYTES.to_vec(),
-            solved,
-        });
-        Ok(outputs)
-    }
-
+impl<'a, A: Artifacts, P> Folding<'a, A, P> {
     fn program(&self, label: &str) -> Result<Program, Error> {
         Program::from_parts(
             label,
             &self.artifacts.bytecode_b64(label)?,
             &self.artifacts.abi_json(label)?,
         )
+    }
+
+    /// Solves one circuit and appends it; returns its raw outputs.
+    fn push(
+        &mut self,
+        label: &'static str,
+        kind: CircuitKind,
+        vk: &'static [u8],
+        program: Program,
+        fields: &[Field],
+    ) -> Result<Vec<Field>, Error> {
+        let solved = program.solve(program.inputs_from_fields(fields)?)?;
+        let outputs = solved.outputs.clone();
+        self.circuits.push(Solving {
+            label,
+            kind,
+            program,
+            vk,
+            solved,
+        });
+        Ok(outputs)
     }
 
     fn vk_input(&self, label: Option<&str>) -> Result<Option<VkInput>, Error> {
@@ -92,31 +91,37 @@ impl<'a, A: Artifacts, P, S> Folding<'a, A, P, S> {
             .find(|c| c.label == label)
             .ok_or_else(|| Error::Proof(format!("{label} is not in the chain")))?;
         Ok(Some(VkInput {
-            key: chonk::vk_fields(&c.vk, c.kind)?,
+            key: chonk::vk_fields(c.vk, c.kind)?,
             path: self.artifacts.vk_path(label)?,
         }))
     }
 
-    /// Solves kernel `K` over the chain so far; the chain comes back empty
-    /// of pending outputs.
-    fn kernel_step<K: Kernel<Prev = P, Step = S>>(
+    fn fold_app(&mut self, app: AppStep<'_>) -> Result<Vec<Field>, Error> {
+        let program = self.program(app.label)?;
+        let fields = match app.inputs {
+            StepInputs::Fields(f) => f,
+            StepInputs::Toml { toml, check } => check(&program.fields_from_toml(toml)?)?,
+        };
+        self.push(app.label, CircuitKind::App, app.vk, program, &fields)
+    }
+
+    /// Solves kernel `K` over the last kernel's outputs and `step`.
+    fn fold_kernel<K: Kernel<Prev = P>>(
         self,
-    ) -> Result<(Folding<'a, A, (), ()>, K::Outputs), Error> {
+        step: K::Step,
+        step_label: Option<&'static str>,
+    ) -> Result<Folding<'a, A, K::Outputs>, Error> {
         let Self {
             artifacts,
             circuits,
             prev,
-            step,
             prev_label,
-            step_label,
         } = self;
         let mut next = Folding {
             artifacts,
             circuits,
             prev: (),
-            step: (),
             prev_label: None,
-            step_label: None,
         };
         let witness = K::witness(KernelInputs {
             prev,
@@ -125,35 +130,54 @@ impl<'a, A: Artifacts, P, S> Folding<'a, A, P, S> {
             step_vk: next.vk_input(step_label)?,
             vk_tree_root: artifacts.vk_tree_root(),
         })?;
-        let out = next.solve::<K>(&witness)?;
-        Ok((next, out))
-    }
-
-    /// Folds kernel `K`, which must take this chain's outputs.
-    pub fn kernel<K: Kernel<Prev = P, Step = S>>(
-        self,
-    ) -> Result<Folding<'a, A, K::Outputs, ()>, Error> {
-        if K::KIND != CircuitKind::Kernel {
-            return Err(Error::Proof(format!("{} is not a kernel", K::LABEL)));
-        }
-        let (next, out) = self.kernel_step::<K>()?;
+        let program = next.program(K::LABEL)?;
+        let out = next.push(
+            K::LABEL,
+            K::KIND,
+            K::VK_BYTES,
+            program,
+            &K::witness_inputs(&witness, &()),
+        )?;
         Ok(Folding {
             artifacts: next.artifacts,
             circuits: next.circuits,
-            prev: out,
-            step: (),
+            prev: from_fields(&out)?,
             prev_label: Some(K::LABEL),
-            step_label: None,
         })
+    }
+
+    /// Folds an app and the kernel it is wrapped with.
+    pub fn app<K: Kernel<Prev = P>>(
+        mut self,
+        wrapped: Wrapped<'_, K>,
+    ) -> Result<Folding<'a, A, K::Outputs>, Error> {
+        if K::KIND != CircuitKind::Kernel {
+            return Err(Error::Proof(format!("{} is not a kernel", K::LABEL)));
+        }
+        let label = wrapped.app.label;
+        let step = from_fields(&self.fold_app(wrapped.app)?)?;
+        self.fold_kernel::<K>(step, Some(label))
+    }
+
+    /// Folds a kernel that takes no app (only the previous kernel).
+    pub fn kernel<K: Kernel<Prev = P, Step = ()>>(
+        self,
+    ) -> Result<Folding<'a, A, K::Outputs>, Error> {
+        if K::KIND != CircuitKind::Kernel {
+            return Err(Error::Proof(format!("{} is not a kernel", K::LABEL)));
+        }
+        self.fold_kernel::<K>((), None)
     }
 
     /// Folds the hiding kernel `H` and proves the chain. Returns the proof and
     /// its public outputs.
-    pub fn hiding<H: Kernel<Prev = P, Step = S>>(self) -> Result<(FoldedProof, H::Outputs), Error> {
+    pub fn hiding<H: Kernel<Prev = P, Step = ()>>(
+        self,
+    ) -> Result<(FoldedProof, H::Outputs), Error> {
         if H::KIND != CircuitKind::Hiding {
             return Err(Error::Proof(format!("{} is not a hiding kernel", H::LABEL)));
         }
-        let (done, out) = self.kernel_step::<H>()?;
+        let done = self.fold_kernel::<H>((), None)?;
         let steps: Vec<Step<'_>> = done
             .circuits
             .iter()
@@ -161,7 +185,7 @@ impl<'a, A: Artifacts, P, S> Folding<'a, A, P, S> {
                 name: c.label,
                 kind: c.kind,
                 bytecode: c.program.bytecode(),
-                vk: &c.vk,
+                vk: c.vk,
                 witness: &c.solved.witness,
             })
             .collect();
@@ -172,62 +196,7 @@ impl<'a, A: Artifacts, P, S> Folding<'a, A, P, S> {
                 "proof's public fields differ from the hiding kernel's outputs".into(),
             ));
         }
-        Ok((proof, out))
-    }
-}
-
-impl<'a, A: Artifacts, P> Folding<'a, A, P, ()> {
-    /// Folds app `C` with its typed witness.
-    pub fn app<C: App>(
-        mut self,
-        witness: &C::Witness,
-    ) -> Result<Folding<'a, A, P, C::Outputs>, Error> {
-        let out = self.solve::<C>(witness)?;
-        Ok(Folding {
-            artifacts: self.artifacts,
-            circuits: self.circuits,
-            prev: self.prev,
-            step: out,
-            prev_label: self.prev_label,
-            step_label: Some(C::LABEL),
-        })
-    }
-
-    /// Folds the app labelled `label` (chosen at runtime) with `Prover.toml`
-    /// inputs: `R` (a generated `Registry`) dispatches the label to its
-    /// circuit type statically, and the inputs decode into that circuit's
-    /// `Witness`. Fails if no app returning `O` has the label.
-    pub fn app_by_label<R: AppDispatch<O>, O>(
-        self,
-        label: &str,
-        toml: &str,
-    ) -> Result<Folding<'a, A, P, O>, Error> {
-        R::visit_app(
-            label,
-            PushApp {
-                folding: self,
-                toml,
-            },
-        )
-        .unwrap_or_else(|| {
-            Err(Error::Artifact(format!(
-                "no active app {label} with this output type"
-            )))
-        })
-    }
-}
-
-struct PushApp<'a, 't, A: Artifacts, P> {
-    folding: Folding<'a, A, P, ()>,
-    toml: &'t str,
-}
-
-impl<'a, A: Artifacts, P, O> AppVisitor<O> for PushApp<'a, '_, A, P> {
-    type Output = Result<Folding<'a, A, P, O>, Error>;
-    fn visit<C: App<Outputs = O>>(self) -> Self::Output {
-        let program = self.folding.program(C::LABEL)?;
-        let witness: C::Witness = from_fields(&program.fields_from_toml(self.toml)?)?;
-        self.folding.app::<C>(&witness)
+        Ok((proof, done.prev))
     }
 }
 
