@@ -202,7 +202,10 @@ fn main() {
 /// [labels]`, writes `<dest>/<name>@<version>.tar.gz` (`<name>.tar.gz`
 /// without `--version`): per circuit its active version's bytecode (from
 /// `--assets`, checked against the pin), verification key and ABI, plus the
-/// key tree and the manifest's entries for them. Other tables are skipped.
+/// key tree and the manifest's entries for them. Also writes
+/// `catalog@<version>.json`: each pack's file, SHA-256, size and circuits,
+/// the toolchain and key tree root, and the packs file's other tables (a
+/// country map, say) as they are.
 fn pack(args: &[String]) {
     let mut flags: BTreeMap<&str, String> = BTreeMap::new();
     let mut it = args.iter();
@@ -246,8 +249,24 @@ fn pack(args: &[String]) {
     let packs: toml::Table =
         toml::from_str(&read(&flag("--packs"))).unwrap_or_else(|e| fail(format!("packs: {e}")));
     std::fs::create_dir_all(&dest).unwrap_or_else(|e| fail(e));
+    let mut catalog = serde_json::Map::new();
+    catalog.insert("generated_by".into(), "noir-zk pack; do not edit".into());
+    if let Some(v) = flags.get("--version") {
+        catalog.insert("version".into(), v.as_str().into());
+    }
+    for key in ["noir", "bb", "vk_tree_root"] {
+        if let Some(v) = doc.get(key).and_then(|v| v.as_str()) {
+            catalog.insert(key.into(), v.into());
+        }
+    }
+    let mut listed = serde_json::Map::new();
     for (name, p) in &packs {
         let Some(labels) = p.get("circuits").and_then(|c| c.as_array()) else {
+            // Not a pack (a country map, say): carried into the catalog as is.
+            catalog.insert(
+                name.clone(),
+                serde_json::to_value(p).unwrap_or_else(|e| fail(e)),
+            );
             continue;
         };
         let mut files: Vec<(String, Vec<u8>)> = vec![];
@@ -286,15 +305,31 @@ fn pack(args: &[String]) {
             "manifest.toml".into(),
             format!("{MANIFEST_HEADER}{subset}").into_bytes(),
         ));
-        let path = dest.join(format!("{name}{suffix}.tar.gz"));
-        let file = std::fs::File::create(&path).unwrap_or_else(|e| fail(e));
-        noir_zk_backend::pack::write_pack(&files, file).unwrap_or_else(|e| fail(e));
+        let file = format!("{name}{suffix}.tar.gz");
+        let path = dest.join(&file);
+        let mut archive = vec![];
+        noir_zk_backend::pack::write_pack(&files, &mut archive).unwrap_or_else(|e| fail(e));
+        std::fs::write(&path, &archive).unwrap_or_else(|e| fail(e));
+        listed.insert(
+            name.clone(),
+            serde_json::json!({
+                "file": file,
+                "sha256": hex::encode(Sha256::digest(&archive)),
+                "bytes": archive.len(),
+                "circuits": labels.iter().filter_map(|l| l.as_str()).collect::<Vec<_>>(),
+            }),
+        );
         println!(
             "noir-zk pack: {} ({} circuits)",
             path.display(),
             labels.len()
         );
     }
+    catalog.insert("packs".into(), listed.into());
+    let path = dest.join(format!("catalog{suffix}.json"));
+    let text = serde_json::to_string_pretty(&catalog).unwrap_or_else(|e| fail(e));
+    std::fs::write(&path, format!("{text}\n")).unwrap_or_else(|e| fail(e));
+    println!("noir-zk pack: {}", path.display());
 }
 
 fn read(path: &Path) -> String {

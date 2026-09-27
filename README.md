@@ -103,7 +103,7 @@ A pack is a self-contained `.tar.gz` of a group of circuits that a prover fetche
 noir-zk pack --out rust/my-zk --assets target/release-assets --packs packs.toml --dest target/packs --version 0.3.0
 ```
 
-Each table of `packs.toml` with a `circuits = [labels]` list becomes `<name>@<version>.tar.gz`; other tables (a country map, say) are ignored. A pack holds, per circuit, `<label>@<version>.b64` (bytecode, checked against the manifest's pin while packing), `.vk` and `.abi.json`, plus `vk-tree.json` and a `manifest.toml` with just its circuits' entries. Archives are deterministic: the same inputs give the same bytes.
+Each table of `packs.toml` with a `circuits = [labels]` list becomes `<name>@<version>.tar.gz`; other tables (a country map, say) are ignored. A pack holds, per circuit, `<label>@<version>.b64` (bytecode, checked against the manifest's pin while packing), `.vk` and `.abi.json`, plus `vk-tree.json` and a `manifest.toml` with just its circuits' entries. Archives are deterministic: the same inputs give the same bytes. `pack` also writes `catalog@<version>.json`, the index a client reads first: each pack's file, SHA-256 and size and its circuits, the Noir and bb versions, the key tree root, and the packs file's other tables (eid-circuits' country map) as they are. Check an archive's SHA-256 against the catalog before unpacking it.
 
 On the client, `pack::unpack` (feature `packs`) extracts a pack into a directory that `DirStore` reads, and `Frozen` checks every asset again. Unpacking accepts only plain files with those names: no paths, directories or links.
 
