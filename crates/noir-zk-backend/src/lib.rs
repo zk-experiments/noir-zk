@@ -8,6 +8,7 @@
 //! - [`honk`]: standalone UltraHonk proofs of generated `Honk` circuits.
 //! - [`frozen`] and [`store`]: a generated registry as the prover's
 //!   [`Artifacts`](noir_zk_core::Artifacts), bytecode fetched and hash-checked.
+//! - `pack` (feature `packs`): circuit packs, `.tar.gz` archives of assets.
 //! - [`srs`]: the BN254 and Grumpkin setups bb needs.
 
 pub mod abi;
@@ -16,6 +17,8 @@ pub mod chonk;
 pub mod fold;
 pub mod frozen;
 pub mod honk;
+#[cfg(feature = "packs")]
+pub mod pack;
 pub mod srs;
 pub mod store;
 pub mod witness;
