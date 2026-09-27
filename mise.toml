@@ -1,0 +1,41 @@
+# Toolchain pins for noir-zk. The frozen circuits (circuits/manifest.toml)
+# record these; xtask reads them at build time.
+
+[env]
+# The Noir release the frozen circuits were compiled with (eid-circuits' pin).
+NOIR_VERSION = "1.0.0-rc.3"
+# Barretenberg: must equal the barretenberg-rs version in Cargo.toml. A bump
+# changes every verification key and the proof format, so it means a new
+# freeze of every circuit.
+BB_VERSION = "7.0.0-nightly.20260927"
+# A compiled eid-circuits checkout (`nargo compile --workspace` + vk-tree.json).
+EID_CIRCUITS = "{{env.EID_CIRCUITS | default(value='../eid-circuits')}}"
+# The GitHub release that holds every frozen bytecode asset. Assets are
+# immutable (`<label>@<version>.b64`), so one release accumulates them all.
+ASSETS_RELEASE = "circuits"
+
+[tasks."freeze"]
+description = "Mint versions for changed circuits of $EID_CIRCUITS (add -- --abi-change for ABI changes)"
+run = "cargo xtask freeze-circuits --eid-circuits $EID_CIRCUITS"
+
+[tasks."freeze:check"]
+description = "Fail if the frozen registry differs from $EID_CIRCUITS"
+run = "cargo xtask freeze-circuits --eid-circuits $EID_CIRCUITS --check"
+
+[tasks."assets:publish"]
+description = "Upload new target/release-assets/*.b64 to the $ASSETS_RELEASE release (existing assets are kept)"
+shell = "bash -c"
+run = '''
+set -euo pipefail
+gh release view "$ASSETS_RELEASE" >/dev/null 2>&1 \
+  || gh release create "$ASSETS_RELEASE" --title "Frozen circuit bytecode" --notes "Bytecode assets, checked against circuits/manifest.toml."
+have="$(gh release view "$ASSETS_RELEASE" --json assets -q '.assets[].name')"
+for f in target/release-assets/*.b64; do
+  name="$(basename "$f")"
+  grep -qxF "$name" <<<"$have" || gh release upload "$ASSETS_RELEASE" "$f"
+done
+'''
+
+[tasks."test:heavy"]
+description = "Prove and verify documents against $EID_CIRCUITS and the local assets"
+run = "NOIR_ZK_EID_CIRCUITS=$(realpath $EID_CIRCUITS) NOIR_ZK_ASSETS=$PWD/target/release-assets cargo test --release -- --nocapture"

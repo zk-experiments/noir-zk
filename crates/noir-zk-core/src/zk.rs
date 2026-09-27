@@ -1,0 +1,89 @@
+//! Circuit seams: a circuit binds a private witness to its public inputs; a
+//! circuit identity pins the exact compiled artifact and verification key;
+//! provers and verifiers are parameterised by the circuit so they agree on
+//! both types.
+
+use crate::error::Error;
+
+/// The field every circuit is compiled over (BN254 scalar field).
+pub type Field = ark_bn254::Fr;
+
+/// A circuit: the binding between the private *witness* and the *public
+/// inputs* (the claim). The prover supplies both.
+pub trait Circuit {
+    /// The private inputs the circuit constrains.
+    type Witness;
+    /// The public inputs (the claim) the circuit exposes.
+    type PublicInputs;
+
+    /// The public inputs as field elements, in circuit order: what a
+    /// verifier checks the proof against.
+    fn public_inputs(public: &Self::PublicInputs) -> Vec<Field>;
+
+    /// Every ABI parameter (private and public, in `main()` declaration
+    /// order, structs and arrays expanded) as field elements in ACIR
+    /// witness-index order: element `i` is ACIR `Witness(i)`.
+    fn witness_inputs(witness: &Self::Witness, public: &Self::PublicInputs) -> Vec<Field>;
+}
+
+/// How Chonk folds a circuit (`bb write_vk --circuit_kind`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CircuitKind {
+    /// A step circuit, folded by the kernel after it.
+    App,
+    /// A kernel: folds the previous kernel and its step.
+    Kernel,
+    /// The final, zero-knowledge kernel whose key verifies the whole proof.
+    Hiding,
+}
+
+impl CircuitKind {
+    /// bb's numbering (Chonk circuit kind).
+    pub const fn code(self) -> u32 {
+        match self {
+            Self::App => 0,
+            Self::Kernel => 1,
+            Self::Hiding => 2,
+        }
+    }
+}
+
+/// The identity of one frozen circuit version. Implemented (build-generated)
+/// by every circuit marker type in `noir-zk-canonical`.
+///
+/// Unlike psonet's `CircuitId`, the bytecode isn't embedded (the 301 circuits
+/// are about 750 MB): it is fetched from an artifact store and must hash to
+/// [`CircuitId::BYTECODE_SHA256`].
+pub trait CircuitId {
+    /// Circuit package name, e.g. `dsc_ecdsa_p256_sha256_tbs1000`.
+    const LABEL: &'static str;
+    /// Frozen version.
+    const VERSION: &'static str;
+    /// How Chonk folds it.
+    const KIND: CircuitKind;
+    /// SHA-256 of the base64 bytecode string as nargo emits it: the
+    /// artifact's pinned identity.
+    const BYTECODE_SHA256: [u8; 32];
+    /// Chonk verification key (bb's binary encoding).
+    const VK_BYTES: &'static [u8];
+}
+
+/// A proof-generation backend for circuit `C`.
+pub trait ProofGenerator<C: Circuit> {
+    /// The proof this backend produces.
+    type Proof;
+    /// Prove `public` for `witness`.
+    fn generate(
+        &self,
+        witness: &C::Witness,
+        public: &C::PublicInputs,
+    ) -> Result<Self::Proof, Error>;
+}
+
+/// A proof-verification backend for circuit `C`.
+pub trait ProofVerifier<C: Circuit> {
+    /// The proof this backend verifies.
+    type Proof;
+    /// Verify `proof` against `public`.
+    fn verify(&self, public: &C::PublicInputs, proof: &Self::Proof) -> Result<bool, Error>;
+}

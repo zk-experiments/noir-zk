@@ -1,0 +1,10 @@
+# nextest profiles. `cargo nextest run` picks `default`; CI passes `--profile ci`.
+
+[profile.default]
+slow-timeout = { period = "5m", terminate-after = 1 }
+
+[profile.ci]
+fail-fast = false
+
+[profile.ci.junit]
+path = "junit.xml"

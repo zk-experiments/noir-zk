@@ -1,0 +1,16 @@
+[package]
+name = "noir-zk-core"
+description = "Circuit seams and field codec for noir-zk: the Circuit / CircuitId identity traits, the prover and verifier seams, and how typed values fold into BN254 field elements"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+ark-ff.workspace = true
+ark-bn254.workspace = true
+
+[lints]
+workspace = true

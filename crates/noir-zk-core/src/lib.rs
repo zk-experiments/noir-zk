@@ -1,0 +1,17 @@
+//! Circuit seams and field codec for noir-zk.
+//!
+//! Ported from psonet's `pso-protocol` (its `protocol::zk` seams and `codec`)
+//! without its `Suite` abstraction: every circuit here is compiled for BN254,
+//! so the field is fixed to [`Field`] (`ark_bn254::Fr`). Circuit types and
+//! their identities are generated in `noir-zk-canonical`; proving and
+//! verification live in `noir-zk-backend`.
+
+pub mod artifacts;
+pub mod codec;
+pub mod error;
+pub mod zk;
+
+pub use artifacts::{Artifacts, VkPath};
+pub use codec::{FieldElement, FieldEncode};
+pub use error::Error;
+pub use zk::{Circuit, CircuitId, CircuitKind, Field, ProofGenerator, ProofVerifier};
