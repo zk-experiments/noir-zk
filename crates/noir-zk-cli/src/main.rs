@@ -391,7 +391,7 @@ fn freeze(o: &Opts) {
         doc["circuit"] = toml_edit::Item::ArrayOfTables(ArrayOfTables::new());
     }
     doc["noir"] = value(compiled.first().map_or("unknown", |c| c.noir.as_str()));
-    doc["bb"] = value(env!("BB_VERSION_PIN"));
+    doc["bb"] = value(noir_zk_backend::BB_VERSION);
     match tree["root"].as_str() {
         Some(root) => doc["vk_tree_root"] = value(root),
         None => {

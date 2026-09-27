@@ -17,10 +17,10 @@ use acvm::pwg::{ACVMStatus, ACVM};
 use base64::Engine;
 use bn254_blackbox_solver::Bn254BlackBoxSolver;
 use flate2::read::GzDecoder;
-use noirc_abi::input_parser::Format;
-use noirc_abi::Abi;
 
 use noir_zk_core::{Error, Field};
+
+use crate::abi::Abi;
 
 fn gunzip(bytes: &[u8], what: &str) -> Result<Vec<u8>, Error> {
     let mut raw = Vec::new();
@@ -55,8 +55,7 @@ impl Program {
             .map_err(|e| Error::Artifact(format!("{name}: bytecode base64: {e}")))?;
         let acir = AcirProgram::deserialize_program(&gz)
             .map_err(|e| Error::Artifact(format!("{name}: ACIR: {e}")))?;
-        let abi: Abi = serde_json::from_str(abi_json)
-            .map_err(|e| Error::Artifact(format!("{name}: ABI: {e}")))?;
+        let abi = Abi::from_json(abi_json).map_err(|e| Error::Artifact(format!("{name}: {e}")))?;
         Ok(Self {
             name: name.to_string(),
             acir,
@@ -87,30 +86,20 @@ impl Program {
 
     /// Inputs from `Prover.toml` text, type-checked and encoded by the ABI.
     pub fn inputs_from_toml(&self, toml: &str) -> Result<WitnessMap<FieldElement>, Error> {
-        let inputs = Format::Toml
-            .parse(toml, &self.abi)
-            .map_err(|e| Error::Abi(format!("{}: {e}", self.name)))?;
-        self.abi
-            .encode(&inputs, None)
-            .map_err(|e| Error::Abi(format!("{}: {e}", self.name)))
+        self.inputs_from_fields(&self.fields_from_toml(toml)?)
     }
 
     /// `Prover.toml` inputs as field elements in witness-index order (to
     /// decode into a generated `Inputs` struct).
     pub fn fields_from_toml(&self, toml: &str) -> Result<Vec<Field>, Error> {
-        let map = self.inputs_from_toml(toml)?;
-        (0..self.abi.field_count())
-            .map(|i| {
-                map.get(&Witness(i))
-                    .map(|f| f.into_repr())
-                    .ok_or_else(|| Error::Abi(format!("{}: input {i} missing", self.name)))
-            })
-            .collect()
+        self.abi
+            .encode_toml(toml)
+            .map_err(|e| Error::Abi(format!("{}: {e}", self.name)))
     }
 
     /// Inputs already flattened in witness-index order (`Circuit::witness_inputs`).
     pub fn inputs_from_fields(&self, fields: &[Field]) -> Result<WitnessMap<FieldElement>, Error> {
-        let expected = self.abi.field_count() as usize;
+        let expected = self.abi.field_count();
         if fields.len() != expected {
             return Err(Error::Abi(format!(
                 "{}: {} input fields, the ABI has {expected}",
@@ -148,12 +137,10 @@ impl Program {
         let solved = acvm.finalize();
 
         // The return value's witnesses follow the parameters' (noirc_abi's layout).
-        let start = self.abi.field_count();
-        let count = self
-            .abi
-            .return_type
-            .as_ref()
-            .map_or(0, |r| r.abi_type.field_count());
+        let start = u32::try_from(self.abi.field_count())
+            .map_err(|_| Error::Abi(format!("{}: too many inputs", self.name)))?;
+        let count = u32::try_from(self.abi.return_field_count())
+            .map_err(|_| Error::Abi(format!("{}: too many outputs", self.name)))?;
         let outputs = (start..start + count)
             .map(|i| {
                 solved
