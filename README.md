@@ -8,9 +8,9 @@ Toolchain: Noir `1.0.0-rc.3` (the linked ACVM), Barretenberg `7.0.0-nightly.2026
 
 | Crate | What it does |
 | --- | --- |
-| `noir-zk-core` | `Field` (BN254 `Fr`), the `Circuit` / `CircuitId` / `ProofGenerator` / `ProofVerifier` traits, `CircuitKind`, the `FieldEncode` codec, `RegistryEntry` / `Status`, and the `Artifacts` trait (bytecode, ABI, key, key-tree path). |
-| `noir-zk-codegen` | Build-dependency generator: typed inputs from nargo ABIs (`generate_types`), or a frozen registry with identities, embedded keys and tree paths (`generate_registry`). |
-| `noir-zk-backend` | ACVM witness solving (`witness`), Chonk prove / verify / key derivation (`chonk`), SRS loading (`srs`), and `Frozen<S>`: a generated registry as `Artifacts`, bytecode from an `ArtifactStore` checked against its pinned SHA-256. |
+| `noir-zk-core` | `Field` (BN254 `Fr`), the `Circuit` trait (typed `Witness` / `PublicInputs` / `Outputs`), `CircuitId`, the fold traits `App` / `Kernel` / `AppDispatch`, the `FieldEncode` / `FromFields` codec, `RegistryEntry` / `Status`, and the `Artifacts` trait (bytecode, ABI, key, key-tree path). |
+| `noir-zk-codegen` | Build-dependency generator: typed inputs and outputs from nargo ABIs (`generate_types`), or a frozen registry (`generate_registry`) where every circuit also gets `CircuitId` with its embedded key, `App` or `Kernel`, and a `Registry` with static label dispatch. |
+| `noir-zk-backend` | Typed folding (`fold::Folding`, `fold::verify`), ACVM witness solving (`witness`), Chonk prove / verify / key derivation (`chonk`), SRS loading (`srs`), and `Frozen<S>`: a generated registry as `Artifacts`, bytecode from an `ArtifactStore` checked against its pinned SHA-256. |
 | `noir-zk-cli` | `noir-zk freeze`: mints circuit versions from nargo output and derives their Chonk keys. |
 
 ## Using it from a circuit repository
@@ -47,13 +47,26 @@ Toolchain: Noir `1.0.0-rc.3` (the linked ACVM), Barretenberg `7.0.0-nightly.2026
 
    ```rust
    pub mod circuits { include!(concat!(env!("OUT_DIR"), "/circuits.rs")); }
-
-   let artifacts = noir_zk_backend::Frozen::new(circuits::REGISTRY, &circuits::VK_TREE_ROOT, DirStore(assets))?;
    ```
 
-4. Prove: solve each step with `witness::Program`, then fold the stack with `chonk::prove(&[Step])` and check it with `chonk::verify(&proof, hiding_vk)`. What goes into the kernels is the circuit repository's business. the `eid-circuits` crate builds its five kernels' inputs and exposes `prove_document` / `verify_document`.
+4. Prove and verify with the backend, passing the generated types:
 
-For typed inputs without freezing, `noir_zk_codegen::generate_types(&nargo_target_abis("target", |_| true)?)` works from any nargo output.
+   ```rust
+   use noir_zk_backend::fold::{verify, Folding};
+
+   let artifacts = noir_zk_backend::Frozen::new(circuits::REGISTRY, &circuits::VK_TREE_ROOT, DirStore(assets))?;
+   let (proof, out) = Folding::new(&artifacts)
+       .app::<MyStep>(&my_step::Inputs { .. })?        // typed witness
+       .kernel::<KernelStep>()?                         // KernelStep::Step must be MyStep::Outputs
+       .app_by_label::<circuits::Registry, _>(label, &prover_toml)?  // chosen at runtime, dispatched statically
+       .kernel::<KernelNext>()?                         // KernelNext::Prev must be KernelStep::Outputs
+       .hiding::<KernelHiding>()?;                      // proves; out: KernelHiding::Outputs
+   let out = verify::<KernelHiding>(&proof, vk_tree_root)?;
+   ```
+
+   The chain is checked at compile time. Each kernel's `Prev` and `Step` types are the outputs of the kernel and app it folds, so a missing or misordered circuit doesn't compile. Kernels take no user inputs. By convention their `main` parameters are drawn from `prev`, `step`, `prev_vk`, `step_vk` and `vk_tree_root`, and the builder fills them. `verify` checks the hiding kernel's pinned key and its `vk_tree_root` output.
+
+For typed inputs without freezing, `noir_zk_codegen::generate_types(&nargo_target_abis("target", |_| true)?)` works from any nargo output (`Inputs`, `Outputs` and `Circuit`; folding needs the frozen registry for the keys).
 
 Versioning is per circuit. A new circuit starts at `1.0.0`. Changed bytecode with the same ABI gets a patch bump. An ABI change is refused without `--abi-change`, which makes a minor bump. The superseded version is marked `deprecated` and loses its ABI but keeps its key and asset. Each derived key's Poseidon2 hash is checked against the tree before anything is written. `--check` writes nothing and fails if the registry is behind the compiled circuits. Kinds: `--hiding LABEL` (default `kernel_hiding`) is the hiding kernel. Labels starting with `--kernel-prefix` (default `kernel_`) are kernels. Everything else is an app.
 
