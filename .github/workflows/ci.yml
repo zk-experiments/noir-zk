@@ -1,7 +1,7 @@
 # CI + release for noir-zk (same shape as eid-circuits and csca-registry).
 #
 #   rust ──────────┐
-#   typos ─────────┼─> ci ──> tag (cog, push:main) ──> github-release
+#   typos ─────────┼─> ci ──> tag (cog, push:main) ──> github-release ──> crates
 #   supply-chain ──┘
 #
 # CI never proves: end-to-end proving tests live with the circuits
@@ -214,3 +214,36 @@ jobs:
           tag_name: ${{ needs.tag.outputs.tag || needs.resolve.outputs.release_tag }}
           name: ${{ needs.tag.outputs.tag || needs.resolve.outputs.release_tag }}
           generate_release_notes: true
+
+  # Publish core, codegen, backend and cli to crates.io at the release tag
+  # (CRATES_PUBLISHING_TOKEN). Crate versions can't be republished, so a
+  # re-release skips those already on crates.io.
+  crates:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    needs: [resolve, tag, github-release]
+    if: always() && needs.github-release.result == 'success'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.tag.outputs.tag || needs.resolve.outputs.release_tag }}
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      # barretenberg-rs links bb's static library against libc++ (publish
+      # builds each crate to verify it).
+      - name: Install libc++
+        run: sudo apt-get update -q && sudo apt-get install -yq libc++-dev libc++abi-dev
+      - name: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_PUBLISHING_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "noir-zk-core") | .version')"
+          todo=()
+          for c in noir-zk-core noir-zk-codegen noir-zk-backend noir-zk-cli; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' -A 'zk-experiments/noir-zk CI' \
+              "https://crates.io/api/v1/crates/$c/$version")"
+            if [ "$code" = 200 ]; then echo "$c $version is already on crates.io"; else todo+=(--package "$c"); fi
+          done
+          if [ ${#todo[@]} -gt 0 ]; then
+            cargo publish --locked "${todo[@]}"
+          fi
