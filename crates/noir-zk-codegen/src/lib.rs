@@ -15,8 +15,7 @@
 //! ```
 //!
 //! Generated code uses `noir-zk-core`'s `Circuit` / `CircuitId`; registry
-//! code also the host crate's `RegistryEntry` and `Status` (as in
-//! `noir-zk-canonical`).
+//! code also its `RegistryEntry` and `Status`.
 
 #![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)] // build-time codegen: fail loudly
 
@@ -262,7 +261,7 @@ pub fn generate_types(abis: &[CircuitAbi]) -> String {
     code
 }
 
-/// The frozen registry of `noir-zk-canonical`: typed modules for every active
+/// A frozen registry (written by `noir-zk freeze`): typed modules for every active
 /// circuit with its `CircuitId` (embedded key), `REGISTRY`, `VK_TREE_ROOT` and
 /// the toolchain versions, from `dir/circuits/manifest.toml`,
 /// `dir/resources/circuits` and `dir/resources/vk-tree.json`. `dir` must be
@@ -308,7 +307,7 @@ pub fn generate_registry(dir: &Path) -> String {
     writeln!(code, "/// Root of the verification key tree the kernels check.\npub const VK_TREE_ROOT: [u8; 32] = {};\n", hex32(manifest["vk_tree_root"].as_str().expect("vk_tree_root"))).ok();
 
     let mut registry = String::from(
-        "/// Every frozen circuit version.\npub const REGISTRY: &[crate::RegistryEntry] = &[\n",
+        "/// Every frozen circuit version.\npub const REGISTRY: &[noir_zk_core::RegistryEntry] = &[\n",
     );
     for c in manifest["circuit"].as_array().expect("[[circuit]]") {
         let label = c["label"].as_str().expect("label");
@@ -337,7 +336,7 @@ pub fn generate_registry(dir: &Path) -> String {
         };
         writeln!(
             registry,
-            "    crate::RegistryEntry {{\n        label: {label:?},\n        version: {version:?},\n        kind: noir_zk_core::CircuitKind::{kind},\n        status: crate::Status::{status_v},\n        bytecode_sha256: {},\n        abi: {},\n        vk: include_bytes!({}),\n        vk_index: {index},\n        vk_siblings: &[{siblings}],\n    }},",
+            "    noir_zk_core::RegistryEntry {{\n        label: {label:?},\n        version: {version:?},\n        kind: noir_zk_core::CircuitKind::{kind},\n        status: noir_zk_core::Status::{status_v},\n        bytecode_sha256: {},\n        abi: {},\n        vk: include_bytes!({}),\n        vk_index: {index},\n        vk_siblings: &[{siblings}],\n    }},",
             hex32(c["bytecode_sha256"].as_str().expect("bytecode_sha256")),
             if status == "active" { format!("Some(include_str!({}))", res("abi.json")) } else { "None".into() },
             res("circuit.vk"),

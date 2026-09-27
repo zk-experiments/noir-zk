@@ -1,7 +1,7 @@
 //! Where a prover gets circuits from: the frozen bytecode (checked against
 //! its pinned hash), the ABI, the Chonk verification key and the key's place
-//! in the verification key tree the kernels check. `noir-zk-canonical`
-//! implements it over its registry and an artifact store.
+//! in the verification key tree the kernels check. `noir-zk-backend`
+//! implements it over a generated registry and an artifact store (`Frozen`).
 
 use crate::error::Error;
 use crate::zk::Field;

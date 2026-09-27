@@ -4,10 +4,8 @@
 #   typos ─────────┼─> ci ──> tag (cog, push:main) ──> github-release
 #   supply-chain ──┘
 #
-# Proving tests need a compiled eid-circuits checkout and the bytecode assets
-# (NOIR_ZK_EID_CIRCUITS / NOIR_ZK_ASSETS); without them they skip, so CI never
-# proves. Freezing is local too (`mise run freeze`), since it needs the
-# compiled circuits.
+# CI never proves: end-to-end proving tests live with the circuits
+# (eid-circuits `eid-zk`).
 #
 # Triggers
 #   push:main         full pipeline incl. cog auto-bump and, when cog tagged, release

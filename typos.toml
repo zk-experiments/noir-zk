@@ -4,7 +4,6 @@
 extend-exclude = [
   "CHANGELOG.md",
   "Cargo.lock",
-  "crates/noir-zk-canonical/resources/**",
 ]
 
 [default]

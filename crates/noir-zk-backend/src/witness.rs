@@ -5,7 +5,7 @@
 //! Ported from `pso-zk-backend`'s witness module. Inputs come either typed
 //! ([`Program::inputs_from_fields`], from a generated circuit type's
 //! `Circuit::witness_inputs`) or as `Prover.toml` text
-//! ([`Program::inputs_from_toml`], what eid-prover writes), encoded by the
+//! ([`Program::inputs_from_toml`]), encoded by the
 //! circuit's ABI.
 
 use std::io::Read;

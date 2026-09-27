@@ -901,24 +901,26 @@ dependencies = [
  "bn254_blackbox_solver",
  "flate2",
  "hex",
- "noir-zk-canonical",
  "noir-zk-core",
  "noirc_abi",
  "serde_json",
  "sha2 0.10.9",
+ "ureq",
 ]
 
 [[package]]
-name = "noir-zk-canonical"
+name = "noir-zk-cli"
 version = "0.1.0"
 dependencies = [
  "ark-bn254",
  "ark-ff",
  "hex",
- "noir-zk-codegen",
+ "noir-zk-backend",
  "noir-zk-core",
+ "pso-poseidon",
+ "serde_json",
  "sha2 0.10.9",
- "ureq",
+ "toml_edit 0.23.10+spec-1.0.0",
 ]
 
 [[package]]
@@ -1856,21 +1858,6 @@ dependencies = [
  "group",
  "hybrid-array",
  "primefield",
-]
-
-[[package]]
-name = "xtask"
-version = "0.1.0"
-dependencies = [
- "ark-bn254",
- "ark-ff",
- "hex",
- "noir-zk-backend",
- "noir-zk-core",
- "pso-poseidon",
- "serde_json",
- "sha2 0.10.9",
- "toml_edit 0.23.10+spec-1.0.0",
 ]
 
 [[package]]
