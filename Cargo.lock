@@ -940,6 +940,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "noir-zk-fixtures"
+version = "0.1.0"
+dependencies = [
+ "noir-zk-backend",
+ "noir-zk-codegen",
+ "noir-zk-core",
+]
+
+[[package]]
 name = "noirc_abi"
 version = "1.0.0-rc.3"
 source = "git+https://github.com/noir-lang/noir.git?tag=v1.0.0-rc.3#5a7ee9bf5ed8973076df7bb0d2b723024db09ae7"

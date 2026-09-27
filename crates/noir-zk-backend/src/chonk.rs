@@ -6,35 +6,21 @@
 //! prover are process-global C++ state and not reentrant, so every call is
 //! serialised by one lock, as in psonet's backend.
 
-use std::sync::{Mutex, MutexGuard};
-
 use ark_ff::PrimeField;
-use barretenberg_rs::api::BarretenbergApi;
-use barretenberg_rs::backends::FfiBackend;
 use barretenberg_rs::generated_types::{ChonkProof, CircuitInput, CircuitInputNoVK};
 
-use noir_zk_core::{CircuitKind, Error, Field};
+use crate::bb::{bb, bb_err};
+
+use noir_zk_core::{ChonkRole, Error, Field};
 
 use crate::srs;
-
-static BB_LOCK: Mutex<()> = Mutex::new(());
-
-fn bb() -> Result<(MutexGuard<'static, ()>, BarretenbergApi<FfiBackend>), Error> {
-    let guard = BB_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let backend = FfiBackend::new().map_err(|e| Error::Proof(format!("bb init: {e}")))?;
-    Ok((guard, BarretenbergApi::new(backend)))
-}
-
-fn bb_err(what: &str) -> impl Fn(barretenberg_rs::error::BarretenbergError) -> Error + '_ {
-    move |e| Error::Proof(format!("bb {what}: {e}"))
-}
 
 /// One circuit of the stack, in folding order.
 pub struct Step<'a> {
     /// Circuit name (diagnostics only).
     pub name: &'a str,
     /// How Chonk folds it.
-    pub kind: CircuitKind,
+    pub kind: ChonkRole,
     /// Uncompressed bytecode (`witness::Program::bytecode`).
     pub bytecode: &'a [u8],
     /// Its Chonk verification key.
@@ -139,7 +125,7 @@ pub fn verify(proof: &FoldedProof, hiding_vk: &[u8]) -> Result<bool, Error> {
 pub fn compute_vk(
     name: &str,
     bytecode: &[u8],
-    kind: CircuitKind,
+    kind: ChonkRole,
 ) -> Result<(Vec<u8>, Vec<Field>), Error> {
     let (_guard, mut api) = bb()?;
     srs::ensure(&mut api)?;
@@ -163,20 +149,20 @@ pub fn compute_vk(
 
 /// The field elements of an app or kernel verification key: what a kernel
 /// takes as input (and hashes into the key tree).
-pub fn vk_fields(vk: &[u8], kind: CircuitKind) -> Result<Vec<Field>, Error> {
+pub fn vk_fields(vk: &[u8], kind: ChonkRole) -> Result<Vec<Field>, Error> {
     let (_guard, mut api) = bb()?;
     let fields = match kind {
-        CircuitKind::App => {
+        ChonkRole::App => {
             api.mega_app_vk_as_fields(vk)
                 .map_err(bb_err("vk as fields"))?
                 .fields
         }
-        CircuitKind::Kernel => {
+        ChonkRole::Kernel => {
             api.mega_kernel_vk_as_fields(vk)
                 .map_err(bb_err("vk as fields"))?
                 .fields
         }
-        CircuitKind::Hiding => {
+        ChonkRole::Hiding => {
             api.mega_z_k_vk_as_fields(vk)
                 .map_err(bb_err("vk as fields"))?
                 .fields

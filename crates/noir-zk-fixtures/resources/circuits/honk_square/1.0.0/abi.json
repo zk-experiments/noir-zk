@@ -1,0 +1,33 @@
+{
+  "abi_version": 1,
+  "error_types": {},
+  "parameters": [
+    {
+      "name": "x",
+      "type": {
+        "kind": "field"
+      },
+      "visibility": "private"
+    },
+    {
+      "name": "y",
+      "type": {
+        "kind": "field"
+      },
+      "visibility": "public"
+    },
+    {
+      "name": "salt",
+      "type": {
+        "kind": "field"
+      },
+      "visibility": "private"
+    }
+  ],
+  "return_type": {
+    "abi_type": {
+      "kind": "field"
+    },
+    "visibility": "public"
+  }
+}

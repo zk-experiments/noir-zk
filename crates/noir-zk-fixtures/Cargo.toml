@@ -1,0 +1,21 @@
+[package]
+name = "noir-zk-fixtures"
+description = "Test fixtures: small Noir circuits frozen with noir-zk freeze, bound with noir-zk-codegen, proved with noir-zk-backend"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+noir-zk-core.workspace = true
+
+[build-dependencies]
+noir-zk-codegen.workspace = true
+
+[dev-dependencies]
+noir-zk-backend.workspace = true
+
+[lints]
+workspace = true

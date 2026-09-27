@@ -35,9 +35,40 @@ pub trait Circuit {
     const VK_TREE_ROOT_OUTPUT: Option<usize> = None;
 }
 
-/// How Chonk folds a circuit (`bb write_vk --circuit_kind`).
+/// Which proof system proves a circuit. `noir-zk freeze` reads it off the
+/// ABI: a circuit using the databus is folded by Chonk (UltraHonk rejects
+/// databus circuits), any other is proved on its own by UltraHonk.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum CircuitKind {
+pub enum ProofSystem {
+    /// A standalone UltraHonk proof, with this transcript hash.
+    UltraHonk(Oracle),
+    /// Folded by Chonk in this role.
+    Chonk(ChonkRole),
+}
+
+/// UltraHonk's transcript hash: fixed per circuit, since its verification
+/// key and proofs depend on it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Oracle {
+    /// Poseidon2: cheap to verify inside another circuit.
+    Poseidon2,
+    /// Keccak: for EVM verifiers.
+    Keccak,
+}
+
+impl Oracle {
+    /// bb's name for it (`oracle_hash_type`).
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Poseidon2 => "poseidon2",
+            Self::Keccak => "keccak",
+        }
+    }
+}
+
+/// A circuit's role in a Chonk fold (`bb write_vk --circuit_kind`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ChonkRole {
     /// A step circuit, folded by the kernel after it.
     App,
     /// A kernel: folds the previous kernel and its step.
@@ -46,7 +77,7 @@ pub enum CircuitKind {
     Hiding,
 }
 
-impl CircuitKind {
+impl ChonkRole {
     /// bb's numbering (Chonk circuit kind).
     pub const fn code(self) -> u32 {
         match self {
@@ -68,12 +99,12 @@ pub trait CircuitId {
     const LABEL: &'static str;
     /// Frozen version.
     const VERSION: &'static str;
-    /// How Chonk folds it.
-    const KIND: CircuitKind;
+    /// Which proof system proves it.
+    const SYSTEM: ProofSystem;
     /// SHA-256 of the base64 bytecode string as nargo emits it: the
     /// artifact's pinned identity.
     const BYTECODE_SHA256: [u8; 32];
-    /// Chonk verification key (bb's binary encoding).
+    /// Verification key (bb's binary encoding, for [`CircuitId::SYSTEM`]).
     const VK_BYTES: &'static [u8];
 }
 
@@ -96,3 +127,8 @@ pub trait ProofVerifier<C: Circuit> {
     /// Verify `proof` against `public`.
     fn verify(&self, public: &C::PublicInputs, proof: &Self::Proof) -> Result<bool, Error>;
 }
+
+/// A circuit proved on its own by UltraHonk ([`ProofSystem::UltraHonk`]):
+/// its proof's public inputs are its `pub` parameters, then its `pub` return
+/// values.
+pub trait Honk: Circuit + CircuitId {}

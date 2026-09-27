@@ -1,3 +1,4 @@
 target/
 .DS_Store
 .idea
+crates/noir-zk-fixtures/noir/target/

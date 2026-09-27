@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/noir-zk-core", "crates/noir-zk-codegen", "crates/noir-zk-backend", "crates/noir-zk-cli"]
+members = ["crates/noir-zk-core", "crates/noir-zk-codegen", "crates/noir-zk-backend", "crates/noir-zk-cli", "crates/noir-zk-fixtures"]
 resolver = "2"
 
 [workspace.package]

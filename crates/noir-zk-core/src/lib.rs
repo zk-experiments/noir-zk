@@ -20,4 +20,6 @@ pub use fold::{
     App, AppDispatch, AppStep, AppVisitor, Kernel, KernelInputs, StepInputs, VkInput, Wrapped,
 };
 pub use registry::{RegistryEntry, Status};
-pub use zk::{Circuit, CircuitId, CircuitKind, Field, ProofGenerator, ProofVerifier};
+pub use zk::{
+    ChonkRole, Circuit, CircuitId, Field, Honk, Oracle, ProofGenerator, ProofSystem, ProofVerifier,
+};

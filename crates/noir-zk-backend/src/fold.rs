@@ -17,8 +17,8 @@
 
 use noir_zk_core::fold::VkInput;
 use noir_zk_core::{
-    from_fields, AppStep, Artifacts, Circuit, CircuitId, CircuitKind, Error, Field, FromFields,
-    Kernel, KernelInputs, StepInputs, Wrapped,
+    from_fields, AppStep, Artifacts, ChonkRole, Circuit, CircuitId, Error, Field, FromFields,
+    Kernel, KernelInputs, ProofSystem, StepInputs, Wrapped,
 };
 
 use crate::chonk::{self, FoldedProof, Step};
@@ -26,7 +26,7 @@ use crate::witness::{Program, Solved};
 
 struct Solving {
     label: &'static str,
-    kind: CircuitKind,
+    kind: ChonkRole,
     program: Program,
     vk: &'static [u8],
     solved: Solved,
@@ -66,7 +66,7 @@ impl<'a, A: Artifacts, P> Folding<'a, A, P> {
     fn push(
         &mut self,
         label: &'static str,
-        kind: CircuitKind,
+        kind: ChonkRole,
         vk: &'static [u8],
         program: Program,
         fields: &[Field],
@@ -102,7 +102,7 @@ impl<'a, A: Artifacts, P> Folding<'a, A, P> {
             StepInputs::Fields(f) => f,
             StepInputs::Toml { toml, check } => check(&program.fields_from_toml(toml)?)?,
         };
-        self.push(app.label, CircuitKind::App, app.vk, program, &fields)
+        self.push(app.label, ChonkRole::App, app.vk, program, &fields)
     }
 
     /// Solves kernel `K` over the last kernel's outputs and `step`.
@@ -131,9 +131,12 @@ impl<'a, A: Artifacts, P> Folding<'a, A, P> {
             vk_tree_root: artifacts.vk_tree_root(),
         })?;
         let program = next.program(K::LABEL)?;
+        let ProofSystem::Chonk(role) = K::SYSTEM else {
+            return Err(Error::Proof(format!("{} is not a Chonk circuit", K::LABEL)));
+        };
         let out = next.push(
             K::LABEL,
-            K::KIND,
+            role,
             K::VK_BYTES,
             program,
             &K::witness_inputs(&witness, &()),
@@ -151,7 +154,7 @@ impl<'a, A: Artifacts, P> Folding<'a, A, P> {
         mut self,
         wrapped: Wrapped<'_, K>,
     ) -> Result<Folding<'a, A, K::Outputs>, Error> {
-        if K::KIND != CircuitKind::Kernel {
+        if K::SYSTEM != ProofSystem::Chonk(ChonkRole::Kernel) {
             return Err(Error::Proof(format!("{} is not a kernel", K::LABEL)));
         }
         let label = wrapped.app.label;
@@ -163,7 +166,7 @@ impl<'a, A: Artifacts, P> Folding<'a, A, P> {
     pub fn kernel<K: Kernel<Prev = P, Step = ()>>(
         self,
     ) -> Result<Folding<'a, A, K::Outputs>, Error> {
-        if K::KIND != CircuitKind::Kernel {
+        if K::SYSTEM != ProofSystem::Chonk(ChonkRole::Kernel) {
             return Err(Error::Proof(format!("{} is not a kernel", K::LABEL)));
         }
         self.fold_kernel::<K>((), None)
@@ -174,7 +177,7 @@ impl<'a, A: Artifacts, P> Folding<'a, A, P> {
     pub fn hiding<H: Kernel<Prev = P, Step = ()>>(
         self,
     ) -> Result<(FoldedProof, H::Outputs), Error> {
-        if H::KIND != CircuitKind::Hiding {
+        if H::SYSTEM != ProofSystem::Chonk(ChonkRole::Hiding) {
             return Err(Error::Proof(format!("{} is not a hiding kernel", H::LABEL)));
         }
         let done = self.fold_kernel::<H>((), None)?;

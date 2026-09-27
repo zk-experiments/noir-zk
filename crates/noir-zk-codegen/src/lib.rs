@@ -243,8 +243,9 @@ fn is_kernel(abi: &Value) -> bool {
 
 /// A module for one circuit: its typed inputs and outputs, and a marker
 /// implementing `noir_zk_core::Circuit` (flattening inputs in ACIR witness
-/// order). With `identity` (a `CircuitId` impl body and the Chonk kind) it
-/// also implements `CircuitId` and `App` or `Kernel`.
+/// order). With `identity` (a `CircuitId` impl body, and `Honk`, `App`,
+/// `Kernel` or `Hiding`) it also implements `CircuitId` and `Honk`, `App` or
+/// `Kernel`.
 fn circuit_module(label: &str, abi: &Value, doc: &str, identity: Option<(&str, &str)>) -> String {
     let params = abi["parameters"].as_array().expect("parameters");
     let ret = abi["return_type"].get("abi_type");
@@ -259,14 +260,38 @@ fn circuit_module(label: &str, abi: &Value, doc: &str, identity: Option<(&str, &
         defs: BTreeMap::new(),
         names: BTreeMap::new(),
     };
-    let mut fields = vec![];
-    let mut flat = String::new();
+    // `pub` parameters go to `PublicInputs` (UltraHonk's claim), the rest to
+    // `Inputs`; witness order interleaves them as the ABI declares them.
+    let (mut fields, mut public) = (vec![], vec![]);
+    let (mut flat, mut flat_public) = (String::new(), String::new());
     for p in params {
         let name = p["name"].as_str().expect("param name");
-        fields.push((name.to_string(), types.rust(&p["type"], &all)));
-        flatten(&p["type"], &format!("w.{name}"), 0, &mut flat);
+        let t = types.rust(&p["type"], &all);
+        if p["visibility"] == "public" {
+            public.push((name.to_string(), t));
+            flatten(&p["type"], &format!("p.{name}"), 0, &mut flat);
+            flatten(&p["type"], &format!("p.{name}"), 0, &mut flat_public);
+        } else {
+            fields.push((name.to_string(), t));
+            flatten(&p["type"], &format!("w.{name}"), 0, &mut flat);
+        }
     }
-    let inputs = struct_def("Inputs", "Every `main` parameter, in ABI order.", &fields);
+    let mut inputs = struct_def(
+        "Inputs",
+        "The private `main` parameters, in ABI order.",
+        &fields,
+    );
+    let public_type = if public.is_empty() {
+        "()"
+    } else {
+        inputs.push('\n');
+        inputs.push_str(&struct_def(
+            "PublicInputs",
+            "The `pub` `main` parameters, in ABI order.",
+            &public,
+        ));
+        "PublicInputs"
+    };
     let out_type = ret.map_or("()".to_string(), |r| types.rust(r, &all));
     let outputs = ret.map_or(0, field_count);
     // A hiding kernel's `vk_tree_root` output, which verifiers must check.
@@ -285,7 +310,7 @@ fn circuit_module(label: &str, abi: &Value, doc: &str, identity: Option<(&str, &
     }
     writeln!(
         code,
-        "{inputs}\n    /// What `main` returns (through the databus, or public for a hiding kernel).\n    pub type Outputs = {out_type};\n\n    /// Field elements the circuit returns.\n    pub const OUTPUT_FIELDS: usize = {outputs};\n\n    /// The `{label}` circuit.\n    pub struct {marker};\n\n    impl noir_zk_core::Circuit for {marker} {{\n        type Witness = Inputs;\n        type PublicInputs = ();\n        type Outputs = Outputs;\n        const VK_TREE_ROOT_OUTPUT: Option<usize> = {root_at};\n        fn public_inputs(_: &()) -> Vec<Fr> {{\n            Vec::new()\n        }}\n        fn witness_inputs(w: &Inputs, _: &()) -> Vec<Fr> {{\n            let mut v = Vec::new();\n{flat}            v\n        }}\n    }}"
+        "{inputs}\n    /// What `main` returns (through the databus, or public for a hiding kernel).\n    pub type Outputs = {out_type};\n\n    /// Field elements the circuit returns.\n    pub const OUTPUT_FIELDS: usize = {outputs};\n\n    /// The `{label}` circuit.\n    pub struct {marker};\n\n    impl noir_zk_core::Circuit for {marker} {{\n        type Witness = Inputs;\n        type PublicInputs = {public_type};\n        type Outputs = Outputs;\n        const VK_TREE_ROOT_OUTPUT: Option<usize> = {root_at};\n        #[allow(unused_mut, unused_variables)]\n        fn public_inputs(p: &{public_type}) -> Vec<Fr> {{\n            let mut v = Vec::new();\n{flat_public}            v\n        }}\n        #[allow(unused_variables)]\n        fn witness_inputs(w: &Inputs, p: &{public_type}) -> Vec<Fr> {{\n            let mut v = Vec::new();\n{flat}            v\n        }}\n    }}"
     )
     .ok();
     if let Some((id, kind)) = identity {
@@ -294,7 +319,9 @@ fn circuit_module(label: &str, abi: &Value, doc: &str, identity: Option<(&str, &
             "\n    impl noir_zk_core::CircuitId for {marker} {{\n{id}    }}"
         )
         .ok();
-        if kind == "App" {
+        if kind == "Honk" {
+            writeln!(code, "\n    impl noir_zk_core::Honk for {marker} {{}}").ok();
+        } else if kind == "App" {
             writeln!(code, "\n    impl noir_zk_core::App for {marker} {{}}").ok();
         } else {
             assert!(
@@ -346,7 +373,7 @@ pub fn generate_types(abis: &[CircuitAbi]) -> String {
 /// A frozen registry (written by `noir-zk freeze`): typed modules for every active
 /// circuit with its `CircuitId` (embedded key), `REGISTRY`, `VK_TREE_ROOT` and
 /// the toolchain versions, from `dir/circuits/manifest.toml`,
-/// `dir/resources/circuits` and `dir/resources/vk-tree.json`. `dir` must be
+/// `dir/resources/circuits` and `dir/resources/vk-tree.json` (if any). `dir` must be
 /// the host crate's `CARGO_MANIFEST_DIR` (the generated `include_bytes!`
 /// paths are relative to it).
 pub fn generate_registry(dir: &Path) -> String {
@@ -356,13 +383,14 @@ pub fn generate_registry(dir: &Path) -> String {
     let manifest: toml::Value =
         toml::from_str(&std::fs::read_to_string(&manifest_path).expect("manifest.toml"))
             .expect("parse manifest.toml");
-    let tree: Value =
-        serde_json::from_str(&std::fs::read_to_string(&tree_path).expect("vk-tree.json"))
-            .expect("parse vk-tree.json");
+    // No key tree for registries without Chonk kernels.
+    let tree: Value = std::fs::read_to_string(&tree_path).map_or(Value::Null, |t| {
+        serde_json::from_str(&t).expect("parse vk-tree.json")
+    });
     let paths: BTreeMap<String, (u64, Vec<String>)> = tree["leaves"]
         .as_array()
-        .expect("leaves")
-        .iter()
+        .into_iter()
+        .flatten()
         .map(|l| {
             (
                 l["package"].as_str().expect("package").to_string(),
@@ -386,7 +414,7 @@ pub fn generate_registry(dir: &Path) -> String {
         let v = manifest[key].as_str().expect("toolchain pin");
         writeln!(code, "/// {key} version the frozen artifacts were built with.\npub const {}_VERSION: &str = {v:?};", key.to_uppercase()).ok();
     }
-    writeln!(code, "/// Root of the verification key tree the kernels check.\npub const VK_TREE_ROOT: [u8; 32] = {};\n", hex32(manifest["vk_tree_root"].as_str().expect("vk_tree_root"))).ok();
+    writeln!(code, "/// Root of the verification key tree the kernels check (zero without one).\npub const VK_TREE_ROOT: [u8; 32] = {};\n", manifest.get("vk_tree_root").map_or_else(|| hex32(&"0".repeat(64)), |r| hex32(r.as_str().expect("vk_tree_root")))).ok();
 
     let mut apps: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut kernels_with_step: Vec<(String, String)> = vec![];
@@ -397,11 +425,34 @@ pub fn generate_registry(dir: &Path) -> String {
         let label = c["label"].as_str().expect("label");
         let version = c["version"].as_str().expect("version");
         let status = c["status"].as_str().expect("status");
-        let kind = match c["kind"].as_str().expect("kind") {
-            "app" => "App",
-            "kernel" => "Kernel",
-            "hiding" => "Hiding",
-            k => panic!("{label}: unknown kind {k}"),
+        let (kind, system) = match (
+            c["system"].as_str().expect("system"),
+            c.get("role").and_then(|r| r.as_str()),
+        ) {
+            ("ultra_honk", _) => {
+                let oracle = match c.get("oracle").and_then(|o| o.as_str()) {
+                    Some("keccak") => "Keccak",
+                    Some("poseidon2") => "Poseidon2",
+                    o => panic!("{label}: unknown oracle {o:?}"),
+                };
+                (
+                    "Honk",
+                    format!("noir_zk_core::ProofSystem::UltraHonk(noir_zk_core::Oracle::{oracle})"),
+                )
+            }
+            ("chonk", Some(role)) => {
+                let role = match role {
+                    "app" => "App",
+                    "kernel" => "Kernel",
+                    "hiding" => "Hiding",
+                    r => panic!("{label}: unknown Chonk role {r}"),
+                };
+                (
+                    role,
+                    format!("noir_zk_core::ProofSystem::Chonk(noir_zk_core::ChonkRole::{role})"),
+                )
+            }
+            (s, r) => panic!("{label}: unknown proof system {s} (role {r:?})"),
         };
         let rel = format!("resources/circuits/{label}/{version}");
         let abi_file = dir.join(&rel).join("abi.json");
@@ -420,7 +471,7 @@ pub fn generate_registry(dir: &Path) -> String {
         };
         writeln!(
             registry,
-            "    noir_zk_core::RegistryEntry {{\n        label: {label:?},\n        version: {version:?},\n        kind: noir_zk_core::CircuitKind::{kind},\n        status: noir_zk_core::Status::{status_v},\n        bytecode_sha256: {},\n        abi: {},\n        vk: include_bytes!({}),\n        vk_index: {index},\n        vk_siblings: &[{siblings}],\n    }},",
+            "    noir_zk_core::RegistryEntry {{\n        label: {label:?},\n        version: {version:?},\n        system: {system},\n        status: noir_zk_core::Status::{status_v},\n        bytecode_sha256: {},\n        abi: {},\n        vk: include_bytes!({}),\n        vk_index: {index},\n        vk_siblings: &[{siblings}],\n    }},",
             hex32(c["bytecode_sha256"].as_str().expect("bytecode_sha256")),
             if status == "active" { format!("Some(include_str!({}))", res("abi.json")) } else { "None".into() },
             res("circuit.vk"),
@@ -434,7 +485,7 @@ pub fn generate_registry(dir: &Path) -> String {
             serde_json::from_str(&std::fs::read_to_string(&abi_file).expect("abi.json"))
                 .expect("parse abi.json");
         let id = format!(
-            "        const LABEL: &'static str = {label:?};\n        const VERSION: &'static str = {version:?};\n        const KIND: noir_zk_core::CircuitKind = noir_zk_core::CircuitKind::{kind};\n        const BYTECODE_SHA256: [u8; 32] = {};\n        const VK_BYTES: &'static [u8] = include_bytes!({});\n",
+            "        const LABEL: &'static str = {label:?};\n        const VERSION: &'static str = {version:?};\n        const SYSTEM: noir_zk_core::ProofSystem = {system};\n        const BYTECODE_SHA256: [u8; 32] = {};\n        const VK_BYTES: &'static [u8] = include_bytes!({});\n",
             hex32(c["bytecode_sha256"].as_str().expect("sha")),
             res("circuit.vk"),
         );
@@ -444,7 +495,7 @@ pub fn generate_registry(dir: &Path) -> String {
             &format!("`{label}` {version} ({kind})."),
             Some((&id, kind)),
         ));
-        if kind != "App" {
+        if kind == "Kernel" || kind == "Hiding" {
             if let Some(step) = abi["parameters"]
                 .as_array()
                 .and_then(|ps| ps.iter().find(|p| p["name"] == "step"))

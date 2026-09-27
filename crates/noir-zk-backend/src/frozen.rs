@@ -103,7 +103,7 @@ impl<S: ArtifactStore> Artifacts for Frozen<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use noir_zk_core::{CircuitKind, Status};
+    use noir_zk_core::{ChonkRole, ProofSystem, Status};
 
     struct Mem(&'static [u8]);
     impl ArtifactStore for Mem {
@@ -119,7 +119,7 @@ mod tests {
         Box::leak(Box::new([RegistryEntry {
             label: "c",
             version: "1.0.0",
-            kind: CircuitKind::App,
+            system: ProofSystem::Chonk(ChonkRole::App),
             status: Status::Active,
             bytecode_sha256: sha,
             abi: None,
