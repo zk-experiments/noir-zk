@@ -217,7 +217,7 @@ jobs:
           name: ${{ needs.tag.outputs.tag || needs.resolve.outputs.release_tag }}
           generate_release_notes: true
 
-  # Publish core, codegen, backend and cli to crates.io at the release tag
+  # Publish core, kernels, codegen, backend and cli to crates.io at the release tag
   # (CRATES_PUBLISHING_TOKEN). Crate versions can't be republished, so a
   # re-release skips those already on crates.io.
   crates:
@@ -241,7 +241,7 @@ jobs:
           set -euo pipefail
           version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "noir-zk-core") | .version')"
           todo=()
-          for c in noir-zk-core noir-zk-codegen noir-zk-backend noir-zk-cli; do
+          for c in noir-zk-core noir-zk-kernels noir-zk-codegen noir-zk-backend noir-zk-cli; do
             code="$(curl -s -o /dev/null -w '%{http_code}' -A 'zk-experiments/noir-zk CI' \
               "https://crates.io/api/v1/crates/$c/$version")"
             if [ "$code" = 200 ]; then echo "$c $version is already on crates.io"; else todo+=(--package "$c"); fi
