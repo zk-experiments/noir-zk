@@ -323,6 +323,17 @@ macro_rules! links {
     )*};
 }
 
+/// Link types with a meaning shared across libraries, so that families of
+/// different registries can chain: a family declaring `link = "PayloadCommitment"`
+/// gets this type rather than one generated for its registry.
+pub mod links {
+    crate::links!(
+        /// A hiding commitment to a six-field payload, `H(domain, salt, payload)`,
+        /// as a payload envelope opens it (the domain is the committing library's).
+        PayloadCommitment,
+    );
+}
+
 // ------------------------------------------------------------ families
 
 /// A family marker type (generated): what the pipeline builder needs to fold

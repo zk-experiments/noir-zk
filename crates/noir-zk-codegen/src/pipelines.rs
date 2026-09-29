@@ -350,6 +350,9 @@ pub(crate) fn pipelines(manifest: &toml::Value, families: &[Family]) -> Vec<Pipe
         .collect()
 }
 
+/// Link types defined by `noir_zk_core::pipeline::links` (shared across libraries).
+const SHARED_LINKS: [&str; 1] = ["PayloadCommitment"];
+
 fn hexf(f: &Field) -> String {
     hex32(&hex::encode(field_to_be_bytes32(f)))
 }
@@ -397,14 +400,16 @@ pub(crate) fn emit(families: &[Family], pipelines: &[Pipeline]) -> String {
         .flat_map(|f| [&f.link_in, &f.link_out])
         .filter_map(|l| l.as_ref().map(|(_, n)| n.as_str()))
         .collect();
-    code.push_str("/// The link types the families declare.\npub mod links {\n    pub use noir_zk_core::NoLink;\n");
-    if !links.is_empty() {
-        writeln!(
-            code,
-            "    noir_zk_core::links!({});",
-            links.iter().copied().collect::<Vec<_>>().join(", ")
-        )
-        .ok();
+    code.push_str("/// The link types the families declare (noir-zk's shared vocabulary re-exported, the rest generated).\npub mod links {\n    pub use noir_zk_core::NoLink;\n");
+    let (shared, own): (Vec<&str>, Vec<&str>) = links
+        .iter()
+        .copied()
+        .partition(|l| SHARED_LINKS.contains(l));
+    for l in shared {
+        writeln!(code, "    pub use noir_zk_core::pipeline::links::{l};").ok();
+    }
+    if !own.is_empty() {
+        writeln!(code, "    noir_zk_core::links!({});", own.join(", ")).ok();
     }
     code.push_str("}\n\n");
     // FAMILIES.
