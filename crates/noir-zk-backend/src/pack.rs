@@ -14,6 +14,8 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 
+#[cfg(feature = "http")]
+use crate::store::ArtifactStore as _;
 use noir_zk_core::Error;
 
 fn io(what: &str) -> impl Fn(std::io::Error) -> Error + '_ {
@@ -87,6 +89,56 @@ pub fn unpack(pack: impl Read, dir: &Path) -> Result<Vec<String>, Error> {
         names.push(name);
     }
     Ok(names)
+}
+
+/// Fetches the packs `wanted` of release `version` from `base` (a catalog
+/// host: `<base>/catalog@<version>.json` lists each pack's file and SHA-256;
+/// `<base>/<file>` is the archive), checks each archive against the catalog,
+/// unpacks it into `dest` and marks it done (`.<pack>@<version>.ok`), so a
+/// pack is downloaded once. Returns the packs fetched this time. The host is
+/// a mirror, not a trust anchor: check the unpacked files against the
+/// registry's pins with [`verify_dir`](crate::frozen::verify_dir). Feature
+/// `http`.
+#[cfg(feature = "http")]
+pub fn ensure(
+    base: &str,
+    version: &str,
+    dest: &Path,
+    wanted: &[&str],
+) -> Result<Vec<String>, Error> {
+    use sha2::{Digest, Sha256};
+    std::fs::create_dir_all(dest).map_err(io("packs dir"))?;
+    let fetch = |file: &str| crate::store::HttpStore(base.to_string()).fetch(file);
+    let mut downloaded = vec![];
+    let mut catalog: Option<serde_json::Value> = None;
+    for pack in wanted {
+        if dest.join(format!(".{pack}@{version}.ok")).exists() {
+            continue;
+        }
+        if catalog.is_none() {
+            let bytes = fetch(&format!("catalog@{version}.json"))?;
+            catalog = Some(
+                serde_json::from_slice(&bytes)
+                    .map_err(|e| Error::Artifact(format!("catalog@{version}.json: {e}")))?,
+            );
+        }
+        let cat = catalog.as_ref().unwrap_or(&serde_json::Value::Null);
+        let entry = &cat["packs"][*pack];
+        let file = entry["file"]
+            .as_str()
+            .ok_or_else(|| Error::Artifact(format!("no pack {pack} in the catalog")))?;
+        let sha = entry["sha256"].as_str().unwrap_or_default();
+        let bytes = fetch(file)?;
+        if hex::encode(Sha256::digest(&bytes)) != sha {
+            return Err(Error::Artifact(format!(
+                "{file}: SHA-256 differs from the catalog"
+            )));
+        }
+        unpack(bytes.as_slice(), dest)?;
+        std::fs::write(dest.join(format!(".{pack}@{version}.ok")), sha).map_err(io("marker"))?;
+        downloaded.push(format!("{file} ({} MB)", bytes.len() / 1_000_000));
+    }
+    Ok(downloaded)
 }
 
 #[cfg(test)]

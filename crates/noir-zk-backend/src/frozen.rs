@@ -9,13 +9,14 @@ use sha2::{Digest, Sha256};
 
 use noir_zk_core::codec::field_from_be_bytes_canonical;
 use noir_zk_core::registry::active;
-use noir_zk_core::{Artifacts, Error, Field, RegistryEntry, VkPath};
+use noir_zk_core::{Artifacts, Error, FamilyEntry, FamilyRef, Field, RegistryEntry, VkPath};
 
 use crate::store::ArtifactStore;
 
 /// A frozen registry with bytecode from `S`.
 pub struct Frozen<S: ArtifactStore> {
     registry: &'static [RegistryEntry],
+    families: &'static [FamilyEntry],
     vk_tree_root: Field,
     store: S,
     cache: Mutex<HashMap<&'static str, String>>,
@@ -34,10 +35,28 @@ impl<S: ArtifactStore> Frozen<S> {
     ) -> Result<Self, Error> {
         Ok(Self {
             registry,
+            families: &[],
             vk_tree_root: field(vk_tree_root)?,
             store,
             cache: Mutex::default(),
         })
+    }
+
+    /// The generated `REGISTRY` and `FAMILIES` of a layered registry (no
+    /// single key tree: the pipeline builder computes the trees), with
+    /// bytecode from `store`.
+    pub fn layered(
+        registry: &'static [RegistryEntry],
+        families: &'static [FamilyEntry],
+        store: S,
+    ) -> Self {
+        Self {
+            registry,
+            families,
+            vk_tree_root: Field::from(0u64),
+            store,
+            cache: Mutex::default(),
+        }
     }
 
     fn entry(&self, name: &str) -> Result<&'static RegistryEntry, Error> {
@@ -97,6 +116,14 @@ impl<S: ArtifactStore> Artifacts for Frozen<S> {
 
     fn vk_tree_root(&self) -> Field {
         self.vk_tree_root
+    }
+
+    fn entry(&self, name: &str) -> Option<&'static RegistryEntry> {
+        active(self.registry, name)
+    }
+
+    fn family(&self, id: &FamilyRef) -> Option<&'static FamilyEntry> {
+        self.families.iter().find(|f| f.id == *id)
     }
 }
 
@@ -170,6 +197,9 @@ mod tests {
             status: Status::Active,
             bytecode_sha256: sha,
             vk_sha256: [0; 32],
+            vk_hash: [0; 32],
+            layer: "",
+            family: "",
             abi: None,
             vk: &[],
             vk_index: None,
