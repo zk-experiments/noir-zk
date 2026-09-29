@@ -1,0 +1,6 @@
+[workspace]
+members = ["lib-a", "lib-b", "combined"]
+resolver = "2"
+
+[profile.dev]
+opt-level = 3

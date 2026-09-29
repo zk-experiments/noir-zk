@@ -28,6 +28,14 @@ pub struct RegistryEntry {
     /// SHA-256 of the verification key ([`RegistryEntry::vk`], a pack's
     /// `.vk` file).
     pub vk_sha256: [u8; 32],
+    /// Poseidon2 hash of the key as fields (`H(vk fields)`, big-endian): the
+    /// family trees' leaf.
+    pub vk_hash: [u8; 32],
+    /// The layer and family this circuit belongs to (`""` for circuits
+    /// outside any family, such as UltraHonk ones).
+    pub layer: &'static str,
+    /// The family.
+    pub family: &'static str,
     /// nargo's ABI JSON (active versions only).
     pub abi: Option<&'static str>,
     /// Verification key.
@@ -43,6 +51,15 @@ impl RegistryEntry {
     pub fn asset_name(&self) -> String {
         format!("{}@{}.b64", self.label, self.version)
     }
+}
+
+/// A registry's library: the name and version its families are identified by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Library {
+    /// The library's name.
+    pub name: &'static str,
+    /// Its version.
+    pub version: &'static str,
 }
 
 /// The active version of `label` in `registry`.

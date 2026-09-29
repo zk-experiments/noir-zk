@@ -1,0 +1,6 @@
+[package]
+name = "tag"
+type = "bin"
+authors = [""]
+
+[dependencies]

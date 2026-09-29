@@ -1,0 +1,6 @@
+[package]
+name = "counter_small"
+type = "bin"
+authors = [""]
+
+[dependencies]

@@ -12,6 +12,57 @@ pub trait ArtifactStore {
     fn fetch(&self, asset: &str) -> Result<Vec<u8>, Error>;
 }
 
+/// Assets compiled into the binary: `(asset name, bytes)` pairs, as
+/// `include_bytes!` gives them (codegen's `bundled` option writes the table).
+pub struct BundledStore(pub &'static [(&'static str, &'static [u8])]);
+
+impl ArtifactStore for BundledStore {
+    fn fetch(&self, asset: &str) -> Result<Vec<u8>, Error> {
+        self.0
+            .iter()
+            .find(|(name, _)| *name == asset)
+            .map(|(_, bytes)| bytes.to_vec())
+            .ok_or_else(|| Error::Artifact(format!("{asset} is not bundled")))
+    }
+}
+
+/// One store per layer: an asset is looked up in the store of the layer its
+/// circuit belongs to (by label, through `layers`), so a registry can bundle
+/// one layer, read another from a directory and fetch a third.
+pub struct LayerStore {
+    layers: Vec<(String, Box<dyn ArtifactStore>)>,
+    /// `label -> layer`.
+    of: fn(&str) -> Option<&'static str>,
+}
+
+impl LayerStore {
+    /// `of` maps a circuit label to its layer (codegen generates `layer_of`).
+    pub fn new(of: fn(&str) -> Option<&'static str>) -> Self {
+        Self { layers: vec![], of }
+    }
+
+    /// Adds `store` for `layer`.
+    #[must_use]
+    pub fn layer(mut self, layer: &str, store: impl ArtifactStore + 'static) -> Self {
+        self.layers.push((layer.to_string(), Box::new(store)));
+        self
+    }
+}
+
+impl ArtifactStore for LayerStore {
+    fn fetch(&self, asset: &str) -> Result<Vec<u8>, Error> {
+        let label = asset.split('@').next().unwrap_or(asset);
+        let layer = (self.of)(label)
+            .ok_or_else(|| Error::Artifact(format!("{asset}: not a circuit of any layer")))?;
+        self.layers
+            .iter()
+            .find(|(l, _)| l == layer)
+            .ok_or_else(|| Error::Artifact(format!("{asset}: no store for layer {layer}")))?
+            .1
+            .fetch(asset)
+    }
+}
+
 /// A local directory of release assets (a download of a release, or
 /// the `--assets` directory of `noir-zk freeze`).
 pub struct DirStore(pub PathBuf);

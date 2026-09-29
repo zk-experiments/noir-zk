@@ -5,6 +5,8 @@
 //! - [`chonk`]: Chonk folding over the FFI (`barretenberg-rs`): accumulate a
 //!   stack of circuits into one proof, verify it, derive keys.
 //! - [`fold`]: typed folding over generated circuit types (`Folding`, `verify`).
+//! - [`pipeline`]: folding a declared pipeline with the generic kernels
+//!   (`PipelineFold`, `verify`).
 //! - [`honk`]: standalone UltraHonk proofs of generated `Honk` circuits.
 //! - [`frozen`] and [`store`]: a generated registry as the prover's
 //!   [`Artifacts`](noir_zk_core::Artifacts), bytecode fetched and hash-checked.
@@ -19,11 +21,14 @@ pub mod frozen;
 pub mod honk;
 #[cfg(feature = "packs")]
 pub mod pack;
+pub mod pipeline;
 pub mod srs;
 pub mod store;
 pub mod witness;
 
 pub use frozen::Frozen;
+/// The generic pipeline kernels (`noir-zk-kernels`): their entries, family and artifacts.
+pub use noir_zk_kernels as kernels;
 
 /// The barretenberg version linked (`barretenberg-rs`): keys and proofs are
 /// only valid for this version.
@@ -31,7 +36,7 @@ pub const BB_VERSION: &str = "7.0.0-nightly.20260927";
 
 #[cfg(feature = "http")]
 pub use store::HttpStore;
-pub use store::{ArtifactStore, DirStore};
+pub use store::{ArtifactStore, BundledStore, DirStore, LayerStore};
 
 #[cfg(test)]
 mod tests {

@@ -9,16 +9,22 @@ pub mod artifacts;
 pub mod codec;
 pub mod error;
 pub mod fold;
+pub mod pipeline;
 pub mod registry;
+pub mod tree;
 pub mod zk;
 
-pub use artifacts::{Artifacts, VkPath};
+pub use artifacts::{Artifacts, Merged, VkPath};
 pub use codec::{from_fields, FieldElement, FieldEncode, FieldReader, FromFields};
 pub use error::Error;
 pub use fold::{
     App, AppDispatch, AppStep, AppVisitor, Kernel, KernelInputs, StepInputs, VkInput, Wrapped,
 };
-pub use registry::{RegistryEntry, Status};
+pub use pipeline::{
+    Accepts, BindSpec, ConstSpec, DeploymentEntry, FamilyEntry, FamilyRef, Layout, Link, LinkSpec,
+    Next, NoLink, PipelineEntry, PositionEntry, Selected, StepFamily,
+};
+pub use registry::{Library, RegistryEntry, Status};
 pub use zk::{
     ChonkRole, Circuit, CircuitId, Field, Honk, Oracle, ProofGenerator, ProofSystem, ProofVerifier,
 };

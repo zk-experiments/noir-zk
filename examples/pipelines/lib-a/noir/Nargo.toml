@@ -1,0 +1,2 @@
+[workspace]
+members = ["seed", "counter_small", "counter_big"]

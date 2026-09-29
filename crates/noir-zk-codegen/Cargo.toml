@@ -12,6 +12,8 @@ categories.workspace = true
 
 
 [dependencies]
+noir-zk-core.workspace = true
+noir-zk-kernels.workspace = true
 hex.workspace = true
 sha2.workspace = true
 serde_json.workspace = true

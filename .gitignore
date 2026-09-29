@@ -2,3 +2,6 @@ target/
 .DS_Store
 .idea
 crates/noir-zk-fixtures/noir/target/
+crates/noir-zk-kernels/noir/target/
+examples/pipelines/target/
+examples/pipelines/*/noir/target/

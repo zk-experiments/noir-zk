@@ -1,0 +1,12 @@
+[package]
+name = "lib-b"
+version = "1.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+noir-zk-core = { path = "../../../crates/noir-zk-core" }
+noir-zk-backend = { path = "../../../crates/noir-zk-backend" }
+
+[build-dependencies]
+noir-zk-codegen = { path = "../../../crates/noir-zk-codegen" }

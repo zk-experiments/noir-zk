@@ -1,0 +1,56 @@
+# Written by noir-zk freeze; do not edit.
+
+noir = "1.0.0-rc.3"
+bb = "7.0.0-nightly.20260927"
+
+[[circuit]]
+label = "counter_big"
+version = "1.0.0"
+system = "chonk"
+role = "app"
+status = "active"
+bytecode_sha256 = "7e3428c0fb7e8944da4a85ea2b04ffc49198c2f3feaee8b353c162ef0e5843f1"
+vk_sha256 = "89dedc8e94641d77aaf4c4748b03ead67f7a26d0ce41add36e072fa84d2fa550"
+vk_hash = "0x196f868c2d65a4d18fab77ced38a8f5b66f99c16747a826430cbfdfb5c62ae2c"
+
+[[circuit]]
+label = "counter_small"
+version = "1.0.0"
+system = "chonk"
+role = "app"
+status = "active"
+bytecode_sha256 = "c21530091962f1cad8192ee34dadb8bde89e5fed682e00059b52e9eb33735de9"
+vk_sha256 = "d2ae1bddd22fd51f52f33aaf21d20297bf44f10c1150b658a7e031ffc61384b5"
+vk_hash = "0x0fd1f98383cde3c8e53d0f10437621debc89a5436c6bad2316a4bbe320d3f1b1"
+
+[[circuit]]
+label = "seed"
+version = "1.0.0"
+system = "chonk"
+role = "app"
+status = "active"
+bytecode_sha256 = "5f50383341a0f08393bc0b074de89bbc8deb3d6e4c33a4c5f7773933b396f614"
+vk_sha256 = "dc874f433c356f557a0a0d3667df029a4f9c151b97627433598bf74554a9a20d"
+vk_hash = "0x28c5d9b0ac6d86820d6eab58813e271734ee21bec010e5a5a160fbfae59b6fe3"
+
+[library]
+name = "lib-a"
+version = "1.0.0"
+
+# The families of this library (hand-written; freeze keeps them and checks their members).
+[[family]]
+layer = "base"
+name = "seed"
+members = ["seed"]
+link_out = { index = 0, link = "Seed" }
+public_from = 1
+slots = ["seed_sq"]
+
+[[family]]
+layer = "base"
+name = "counter"
+members = ["counter_*"]
+link_in = { index = 0, link = "Seed" }
+link_out = { index = 1, link = "Count" }
+public_from = 2
+slots = ["n"]

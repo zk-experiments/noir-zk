@@ -1,0 +1,116 @@
+{
+  "abi_version": 1,
+  "error_types": {
+    "11019205087382408538": {
+      "error_kind": "string",
+      "string": "Field failed to decompose into specified 4 limbs"
+    },
+    "2821957367578767085": {
+      "error_kind": "string",
+      "string": "the key's family is not in the pipeline tree at this position with this layout"
+    },
+    "819864067177566446": {
+      "error_kind": "string",
+      "string": "Field failed to decompose into specified 8 limbs"
+    }
+  },
+  "parameters": [
+    {
+      "name": "prev",
+      "type": {
+        "kind": "array",
+        "length": 36,
+        "type": {
+          "kind": "field"
+        }
+      },
+      "visibility": "databus"
+    },
+    {
+      "name": "prev_vk",
+      "type": {
+        "fields": [
+          {
+            "name": "key",
+            "type": {
+              "kind": "array",
+              "length": 151,
+              "type": {
+                "kind": "field"
+              }
+            }
+          },
+          {
+            "name": "family",
+            "type": {
+              "fields": [
+                {
+                  "name": "index",
+                  "type": {
+                    "kind": "field"
+                  }
+                },
+                {
+                  "name": "siblings",
+                  "type": {
+                    "kind": "array",
+                    "length": 8,
+                    "type": {
+                      "kind": "field"
+                    }
+                  }
+                }
+              ],
+              "kind": "struct",
+              "path": "pipeline_kernel::MerklePath"
+            }
+          },
+          {
+            "name": "family_id",
+            "type": {
+              "kind": "field"
+            }
+          },
+          {
+            "name": "pipeline",
+            "type": {
+              "fields": [
+                {
+                  "name": "index",
+                  "type": {
+                    "kind": "field"
+                  }
+                },
+                {
+                  "name": "siblings",
+                  "type": {
+                    "kind": "array",
+                    "length": 4,
+                    "type": {
+                      "kind": "field"
+                    }
+                  }
+                }
+              ],
+              "kind": "struct",
+              "path": "pipeline_kernel::MerklePath"
+            }
+          }
+        ],
+        "kind": "struct",
+        "path": "pipeline_kernel::Vk"
+      },
+      "visibility": "private"
+    }
+  ],
+  "return_type": {
+    "abi_type": {
+      "kind": "array",
+      "length": 36,
+      "type": {
+        "kind": "field"
+      }
+    },
+    "visibility": "databus"
+  }
+}
