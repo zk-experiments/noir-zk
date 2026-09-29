@@ -117,7 +117,7 @@ positions = ["my-lib/base/seed", "my-lib/base/counter", "lib-b/ext/sum"]
 
 **Codegen.** From the manifest, `generate_registry` emits, besides the per-circuit types: `LIBRARY`; `FAMILIES` and one marker type per family (`families::KernelStep<Name>`, a `StepFamily` with the family's record type and link types); `links` (unit types for the link names); `pipelines::<name>` with `ROOT`, `PIPELINE`, an `Outputs` struct with a field per slot, `fold(&dyn Artifacts)` and `verify(&FoldedProof) -> Outputs`; `DEPLOYMENT` and `DEPLOYMENT_ROOT`; and a test that recomputes every root at run time. Roots are computed in `build.rs` with the same Poseidon2 as the runtime (`noir_zk_core::tree`). A combining crate wraps other libraries' registries with `noir_zk_codegen::wrapped(LIBRARY, REGISTRY, FAMILIES)` from its `build.rs` (`Options::sources`), or from a file for a registry frozen with an older noir-zk (a tool derives the key hashes and commits it).
 
-**Folding.** The pool a fold draws from is `Merged::new(&[&lib_a, &lib_b, &Kernels])`; the chain is typed by the families' links:
+**Folding.** The pool a fold draws from is `Merged::new(&[&lib_a, &lib_b, &Kernels])`, a lookup taking the first store that has a circuit (so a registry whose labels shadow another's, or the kernels when a registry carries its own `kernel_*` circuits, goes first); the chain is typed by the families' links:
 
 ```rust
 let (proof, _) = seed_count_sum::fold(&pool)?
