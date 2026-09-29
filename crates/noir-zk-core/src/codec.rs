@@ -39,6 +39,15 @@ pub fn field_from_be_bytes_canonical(bytes: &[u8], what: &'static str) -> Result
     Field::from_bigint(repr).ok_or(Error::NonCanonical(what))
 }
 
+/// A field element as a `u64`, or none if it doesn't fit.
+pub fn field_to_u64(f: &Field) -> Option<u64> {
+    let le = f.into_bigint().to_bytes_le();
+    le[8..]
+        .iter()
+        .all(|b| *b == 0)
+        .then(|| u64::from_le_bytes(le[..8].try_into().unwrap_or([0; 8])))
+}
+
 /// A field element as 32 big-endian bytes (bb's and the chain's encoding).
 pub fn field_to_be_bytes32(f: &Field) -> [u8; 32] {
     let be = f.into_bigint().to_bytes_be();
