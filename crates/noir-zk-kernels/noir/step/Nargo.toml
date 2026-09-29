@@ -1,0 +1,8 @@
+[package]
+name = "kernel_step"
+type = "bin"
+authors = ["zk-experiments"]
+compiler_version = ">=1.0.0"
+
+[dependencies]
+pipeline_kernel = { path = "../lib" }

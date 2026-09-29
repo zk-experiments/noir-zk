@@ -1,0 +1,48 @@
+# Written by noir-zk freeze; do not edit.
+
+noir = "1.0.0-rc.3"
+bb = "7.0.0-nightly.20260927"
+
+[[circuit]]
+label = "kernel_hiding"
+version = "1.0.0"
+system = "chonk"
+role = "hiding"
+status = "active"
+bytecode_sha256 = "5e6d1307147acbfa32102c449b0c73a099b848924fc5fa97dd36fb3b78a6504e"
+vk_sha256 = "f1851018b1fb1d490ece459b213a926940ede8d10a2e0a096f9488a710a72dba"
+vk_hash = "0x1e0dfbcdddf383f6e6fafdbbc6c5ea9cd498c974ef4905dbde810094486e9f35"
+
+[[circuit]]
+label = "kernel_init"
+version = "1.0.0"
+system = "chonk"
+role = "kernel"
+status = "active"
+bytecode_sha256 = "cfed41d4890af2039166b5f7a035b15209576121f7886db18adb4894df8a6b0d"
+vk_sha256 = "cf0166373a69ba1a5b0e721f4b6d3fa63cd4ae012500cb01c74196c364e8a0da"
+vk_hash = "0x01fbd67e4dc9b7de4b45982d802cdbb52e9fe1a037c96670c0c938a1c0baea63"
+
+[[circuit]]
+label = "kernel_step"
+version = "1.0.0"
+system = "chonk"
+role = "kernel"
+status = "active"
+bytecode_sha256 = "4d337c5cb98196f8beaac2c95aff3bc2dafce622b79657612a24044006075d70"
+vk_sha256 = "c4ce000365819288b543b7b75b23ab78db1fa9596097d2a2af7ff1a641444e3f"
+vk_hash = "0x09061a75257d177389fc3d08327d1c3376b805eaee09e660f4125eb935172fd0"
+
+[[circuit]]
+label = "kernel_tail"
+version = "1.0.0"
+system = "chonk"
+role = "kernel"
+status = "active"
+bytecode_sha256 = "2cd15f67f1cd01d2b8f456947ea201a5be745f8e19eaadbafb0645358207ba2e"
+vk_sha256 = "fe31a372ae8907a129e3077e8bea5a59d0708cbc72de5caffd7fe787d8c810ea"
+vk_hash = "0x158d038df9bcc6a0af858f3233df054403e039a549a7e5fa0c21e30ef26564d8"
+
+[library]
+name = "noir-zk-kernels"
+version = "0.3.0-dev"
