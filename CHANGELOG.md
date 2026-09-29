@@ -2,6 +2,32 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.3.0 - 2026-09-29
+#### Features
+- (**backend**) pipeline folding, bundled and per-layer stores, packs from a catalog - (74c702b) - Anton Velichko
+- (**cli**) freeze records the library and key hashes and keeps families - (fed0e3c) - Anton Velichko
+- (**codegen**) families, pipelines and deployment roots - (ad95f24) - Anton Velichko
+- (**core**) a shared link vocabulary, starting with PayloadCommitment - (b1abb80) - Anton Velichko
+- (**core**) key trees, layered registry types and merged artifacts - (a1a0904) - Anton Velichko
+- <span style="background-color: #d73a49; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold; font-size: 0.85em;">BREAKING</span>(**kernels**) constant bindings - (dd2d33f) - Anton Velichko
+- <span style="background-color: #d73a49; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold; font-size: 0.85em;">BREAKING</span>(**kernels**) 32 public slots - (61d71d5) - Anton Velichko
+- (**kernels**) the generic pipeline kernels as a crate - (ce9a0c1) - Anton Velichko
+#### Bug Fixes
+- (**kernels**) freeze the kernels as noir-zk-kernels@0.3.0 - (1e4b670) - Anton Velichko
+#### Documentation
+- (**core**) a payload size is a link type of its own - (fa57892) - Anton Velichko
+- merged artifacts take the first store that has a circuit - (ab72951) - Anton Velichko
+- layers, families, kernel steps, pipelines, loading strategies and the verifier contract - (3412c0f) - Anton Velichko
+- install and depend on noir-zk from crates.io - (e81b6eb) - Anton Velichko
+#### Tests
+- (**examples**) two toy libraries and a combining crate with three pipelines - (ae399d0) - Anton Velichko
+#### Continuous Integration
+- publish noir-zk-kernels with the other crates - (e466c71) - Anton Velichko
+#### Miscellaneous Chores
+- (**version**) 0.3.0-dev, the noir-zk-kernels crate joins the workspace - (09c89e5) - Anton Velichko
+
+- - -
+
 ## v0.2.1 - 2026-09-27
 #### Bug Fixes
 - (**docs**) describe noir-zk on its own terms - (de192bb) - Anton Velichko
