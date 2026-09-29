@@ -45,4 +45,4 @@ vk_hash = "0x18e030209fe98ba251c0d03bb12935abf6e3ccca22e9d3038eaf88808c0e8dbe"
 
 [library]
 name = "noir-zk-kernels"
-version = "0.3.0-dev"
+version = "0.3.0"
