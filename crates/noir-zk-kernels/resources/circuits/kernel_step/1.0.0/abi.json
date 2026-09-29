@@ -1,6 +1,10 @@
 {
   "abi_version": 1,
   "error_types": {
+    "10179434181677767770": {
+      "error_kind": "string",
+      "string": "too many constant bindings"
+    },
     "10331014529620997131": {
       "error_kind": "string",
       "string": "app does not continue the pipeline's link"
@@ -32,6 +36,10 @@
     "819864067177566446": {
       "error_kind": "string",
       "string": "Field failed to decompose into specified 8 limbs"
+    },
+    "9452202584648203073": {
+      "error_kind": "string",
+      "string": "app output differs from the constant its family pins"
     },
     "9639617630785913246": {
       "error_kind": "string",
@@ -279,6 +287,36 @@
               "kind": "integer",
               "sign": "unsigned",
               "width": 32
+            }
+          },
+          {
+            "name": "n_const",
+            "type": {
+              "kind": "integer",
+              "sign": "unsigned",
+              "width": 32
+            }
+          },
+          {
+            "name": "const_index",
+            "type": {
+              "kind": "array",
+              "length": 2,
+              "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 32
+              }
+            }
+          },
+          {
+            "name": "const_value",
+            "type": {
+              "kind": "array",
+              "length": 2,
+              "type": {
+                "kind": "field"
+              }
             }
           }
         ],

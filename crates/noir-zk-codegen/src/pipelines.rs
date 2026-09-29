@@ -30,6 +30,8 @@ pub(crate) struct Family {
     pub link_in: Option<(usize, String)>,
     pub link_out: Option<(usize, String)>,
     pub binds: Vec<(String, usize)>,
+    /// (record index, value) constant bindings.
+    pub consts: Vec<(usize, Field)>,
     pub public_from: usize,
     pub slots: Vec<String>,
     pub wrapped: bool,
@@ -240,6 +242,41 @@ pub(crate) fn families(
                     .collect()
             })
             .unwrap_or_default();
+        let consts: Vec<(usize, Field)> = get("bind_const")
+            .and_then(|b| b.as_array().cloned())
+            .map(|b| {
+                b.iter()
+                    .map(|x| {
+                        let index =
+                            usize::try_from(x["index"].as_integer().expect("bind_const index"))
+                                .unwrap();
+                        let value = match &x["value"] {
+                            toml::Value::Integer(i) => {
+                                Field::from(u64::try_from(*i).expect("bind_const value"))
+                            }
+                            toml::Value::String(s) => {
+                                let s = s.trim_start_matches("0x");
+                                field_from_be_bytes(
+                                    &hex::decode(format!("{s:0>64}"))
+                                        .expect("bind_const value: hex"),
+                                )
+                            }
+                            v => panic!("{what}: bind_const value {v}: an integer or a hex string"),
+                        };
+                        (index, value)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(
+            consts.len() <= noir_zk_core::pipeline::C,
+            "{what}: at most {} constant bindings",
+            noir_zk_core::pipeline::C
+        );
+        assert!(
+            consts.iter().all(|(i, _)| *i < record_fields),
+            "{what}: a constant binding beyond the record"
+        );
         let public_from = get("public_from")
             .and_then(|p| p.as_integer())
             .map_or(0, |p| usize::try_from(p).unwrap());
@@ -264,6 +301,7 @@ pub(crate) fn families(
             link_in: link(get("link_in").as_ref()),
             link_out: link(get("link_out").as_ref()),
             binds,
+            consts,
             public_from,
             slots,
             wrapped,
@@ -323,6 +361,18 @@ pub(crate) fn pipelines(manifest: &toml::Value, families: &[Family]) -> Vec<Pipe
                         (s, *index)
                     })
                     .collect();
+                // Two positions folding one circuit under the same constant
+                // bindings (two envelope instances pinned to one key domain,
+                // say) would be indistinguishable to the app: refused.
+                for (j, (fj, _)) in positions.iter().enumerate() {
+                    let g: &Family = &families[*fj];
+                    let shared = g.members.iter().any(|(l, _)| f.members.iter().any(|(m, _)| m == l));
+                    assert!(
+                        !(shared && g.consts == f.consts),
+                        "pipeline {name}, positions {j} ({}) and {i} ({id}): the same circuit under the same constant bindings",
+                        g.id()
+                    );
+                }
                 positions.push((
                     fi,
                     Layout {
@@ -331,6 +381,7 @@ pub(crate) fn pipelines(manifest: &toml::Value, families: &[Family]) -> Vec<Pipe
                         binds,
                         pub_from: f.public_from,
                         n_pub: f.slots.len(),
+                        consts: f.consts.clone(),
                     },
                 ));
                 published.extend(f.slots.iter().cloned());
@@ -431,7 +482,17 @@ pub(crate) fn emit(families: &[Family], pipelines: &[Pipeline]) -> String {
             .map(|(s, i)| format!("noir_zk_core::BindSpec {{ slot: {s:?}, index: {i} }}"))
             .collect();
         let slots: Vec<String> = f.slots.iter().map(|s| format!("{s:?}")).collect();
-        writeln!(code, "    noir_zk_core::FamilyEntry {{\n        id: noir_zk_core::FamilyRef {{ library: {:?}, layer: {:?}, family: {:?} }},\n        version: {:?},\n        members: &[{}],\n        record_fields: {},\n        link_in: {},\n        link_out: {},\n        binds: &[{}],\n        public_from: {},\n        slots: &[{}],\n        root: {},\n    }},", f.library, f.layer, f.name, f.version, members.join(", "), f.record_fields, spec(&f.link_in), spec(&f.link_out), binds.join(", "), f.public_from, slots.join(", "), hexf(&f.root)).ok();
+        let consts: Vec<String> = f
+            .consts
+            .iter()
+            .map(|(i, v)| {
+                format!(
+                    "noir_zk_core::ConstSpec {{ index: {i}, value: {} }}",
+                    hexf(v)
+                )
+            })
+            .collect();
+        writeln!(code, "    noir_zk_core::FamilyEntry {{\n        id: noir_zk_core::FamilyRef {{ library: {:?}, layer: {:?}, family: {:?} }},\n        version: {:?},\n        members: &[{}],\n        record_fields: {},\n        link_in: {},\n        link_out: {},\n        binds: &[{}],\n        consts: &[{}],\n        public_from: {},\n        slots: &[{}],\n        root: {},\n    }},", f.library, f.layer, f.name, f.version, members.join(", "), f.record_fields, spec(&f.link_in), spec(&f.link_out), binds.join(", "), consts.join(", "), f.public_from, slots.join(", "), hexf(&f.root)).ok();
     }
     code.push_str("];\n\n");
     // Family marker types.
@@ -460,7 +521,7 @@ pub(crate) fn emit(families: &[Family], pipelines: &[Pipeline]) -> String {
             .map(|(fi, l)| {
                 let f = &families[*fi];
                 let opt = |o: Option<usize>| o.map_or("None".to_string(), |i| format!("Some({i})"));
-                format!("noir_zk_core::PositionEntry {{ family: noir_zk_core::FamilyRef {{ library: {:?}, layer: {:?}, family: {:?} }}, layout: noir_zk_core::Layout {{ link_in: {}, link_out: {}, binds: vec![{}], pub_from: {}, n_pub: {} }} }}", f.library, f.layer, f.name, opt(l.link_in), opt(l.link_out), l.binds.iter().map(|(s, r)| format!("({s}, {r})")).collect::<Vec<_>>().join(", "), l.pub_from, l.n_pub)
+                format!("noir_zk_core::PositionEntry {{ family: noir_zk_core::FamilyRef {{ library: {:?}, layer: {:?}, family: {:?} }}, layout: noir_zk_core::Layout {{ link_in: {}, link_out: {}, binds: vec![{}], pub_from: {}, n_pub: {}, consts: vec![{}] }} }}", f.library, f.layer, f.name, opt(l.link_in), opt(l.link_out), l.binds.iter().map(|(s, r)| format!("({s}, {r})")).collect::<Vec<_>>().join(", "), l.pub_from, l.n_pub, l.consts.iter().map(|(i, v)| format!("({i}, noir_zk_core::codec::field_from_be_bytes(&{}))", hexf(v))).collect::<Vec<_>>().join(", "))
             })
             .collect();
         let slot_fields: String = p
@@ -492,4 +553,122 @@ pub(crate) fn emit(families: &[Family], pipelines: &[Pipeline]) -> String {
     }
     code.push_str("        assert_eq!(tree::Tree::build(&roots, tree::DEPLOYMENT_HEIGHT).root, super::DEPLOYMENT.root_field(), \"deployment\");\n    }\n}\n");
     code
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manifest(pipeline: &str) -> toml::Value {
+        toml::from_str(&format!(
+            r#"
+[library]
+name = "lib"
+version = "1.0.0"
+
+[[circuit]]
+label = "env"
+version = "1.0.0"
+system = "chonk"
+role = "app"
+status = "active"
+vk_hash = "0x01"
+bytecode_sha256 = "00"
+vk_sha256 = "00"
+
+[[circuit]]
+label = "seed"
+version = "1.0.0"
+system = "chonk"
+role = "app"
+status = "active"
+vk_hash = "0x02"
+bytecode_sha256 = "00"
+vk_sha256 = "00"
+
+[[family]]
+layer = "l"
+name = "seed"
+members = ["seed"]
+link_out = {{ index = 0, link = "Seed" }}
+public_from = 1
+slots = ["ctx"]
+
+[[family]]
+layer = "l"
+name = "env_a"
+members = ["env"]
+link_in = {{ index = 0, link = "Seed" }}
+binds = [{{ slot = "ctx", index = 1 }}]
+bind_const = [{{ index = 2, value = "0x0a" }}]
+public_from = 3
+slots = ["a0"]
+
+[[family]]
+layer = "l"
+name = "env_b"
+members = ["env"]
+link_in = {{ index = 0, link = "Seed" }}
+binds = [{{ slot = "ctx", index = 1 }}]
+bind_const = [{{ index = 2, value = 11 }}]
+public_from = 3
+slots = ["b0"]
+
+[[family]]
+layer = "l"
+name = "env_a2"
+members = ["env"]
+link_in = {{ index = 0, link = "Seed" }}
+bind_const = [{{ index = 2, value = "0x0a" }}]
+public_from = 3
+slots = ["a1"]
+
+[[pipeline]]
+name = "p"
+positions = [{pipeline}]
+"#
+        ))
+        .unwrap()
+    }
+
+    fn actives() -> BTreeMap<String, Active> {
+        ["env", "seed"]
+            .iter()
+            .map(|l| {
+                (
+                    l.to_string(),
+                    Active {
+                        vk_hash: Some(format!("0x0{}", l.len())),
+                        record_fields: 4,
+                        is_app: true,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    /// One circuit under two constant bindings is two families with two
+    /// layouts; the same binding twice in one pipeline is refused.
+    #[test]
+    fn constant_bindings_distinguish_families_and_positions() {
+        let m = manifest(r#""lib/l/seed", "lib/l/env_a", "lib/l/env_b""#);
+        let fs = families(Path::new("."), &m, ("lib", "1.0.0"), &actives(), &[]);
+        assert_eq!(fs[1].consts, vec![(2, Field::from(10u64))]);
+        assert_eq!(fs[2].consts, vec![(2, Field::from(11u64))]);
+        assert_ne!(
+            fs[1].root, fs[2].root,
+            "two families over one circuit: two identities"
+        );
+        let ps = pipelines(&m, &fs);
+        assert_ne!(ps[0].positions[1].1.hash(), ps[0].positions[2].1.hash());
+        assert_eq!(ps[0].positions[1].1.consts, vec![(2, Field::from(10u64))]);
+    }
+
+    #[test]
+    #[should_panic(expected = "the same circuit under the same constant bindings")]
+    fn the_same_circuit_under_one_constant_twice_is_refused() {
+        let m = manifest(r#""lib/l/seed", "lib/l/env_a", "lib/l/env_a2""#);
+        let fs = families(Path::new("."), &m, ("lib", "1.0.0"), &actives(), &[]);
+        let _ = pipelines(&m, &fs);
+    }
 }

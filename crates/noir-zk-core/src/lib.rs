@@ -21,8 +21,8 @@ pub use fold::{
     App, AppDispatch, AppStep, AppVisitor, Kernel, KernelInputs, StepInputs, VkInput, Wrapped,
 };
 pub use pipeline::{
-    Accepts, BindSpec, DeploymentEntry, FamilyEntry, FamilyRef, Layout, Link, LinkSpec, Next,
-    NoLink, PipelineEntry, PositionEntry, Selected, StepFamily,
+    Accepts, BindSpec, ConstSpec, DeploymentEntry, FamilyEntry, FamilyRef, Layout, Link, LinkSpec,
+    Next, NoLink, PipelineEntry, PositionEntry, Selected, StepFamily,
 };
 pub use registry::{Library, RegistryEntry, Status};
 pub use zk::{

@@ -21,6 +21,8 @@ pub const R: usize = 16;
 pub const P: usize = 32;
 /// Bindings per position (`kernel::B`).
 pub const B: usize = 2;
+/// Constant bindings per position (`kernel::C`).
+pub const C: usize = 2;
 /// The state between kernels.
 pub const STATE_FIELDS: usize = 4 + P;
 /// The hiding kernel's outputs: `deployment_root`, `pipeline_root`, `length`, the slots.
@@ -41,6 +43,9 @@ pub struct Layout {
     pub pub_from: usize,
     /// Its length.
     pub n_pub: usize,
+    /// (record index, value) pairs the record must carry: a family pins a
+    /// record field to a constant and the kernel enforces it.
+    pub consts: Vec<(usize, Field)>,
 }
 
 impl Layout {
@@ -54,21 +59,17 @@ impl Layout {
             .map_or((0, 0), |(s, r)| (*s as u64, *r as u64))
     }
 
-    /// `H(link_in, link_out, n_bind, bind_slot × B, bind_index × B, pub_from, n_pub)`,
-    /// with `R` for "no link".
-    pub fn hash(&self) -> Field {
-        let mut v = vec![
-            Self::idx(self.link_in),
-            Self::idx(self.link_out),
-            self.binds.len() as u64,
-        ];
-        v.extend((0..B).map(|i| self.bind(i).0));
-        v.extend((0..B).map(|i| self.bind(i).1));
-        v.extend([self.pub_from as u64, self.n_pub as u64]);
-        hash(&v.into_iter().map(Field::from).collect::<Vec<_>>())
+    fn constant(&self, i: usize) -> (Field, Field) {
+        self.consts
+            .get(i)
+            .map_or((Field::from(0u64), Field::from(0u64)), |(r, v)| {
+                (Field::from(*r as u64), *v)
+            })
     }
 
-    /// The kernel's `Layout` parameter as fields, in ABI order.
+    /// The kernel's `Layout` parameter as fields, in ABI order:
+    /// `link_in, link_out, n_bind, bind_slot × B, bind_index × B, pub_from,
+    /// n_pub, n_const, const_index × C, const_value × C`, with `R` for "no link".
     pub fn fields(&self) -> Vec<Field> {
         let mut v = vec![
             Self::idx(self.link_in),
@@ -77,9 +78,30 @@ impl Layout {
         ];
         v.extend((0..B).map(|i| self.bind(i).0));
         v.extend((0..B).map(|i| self.bind(i).1));
-        v.extend([self.pub_from as u64, self.n_pub as u64]);
-        v.into_iter().map(Field::from).collect()
+        v.extend([
+            self.pub_from as u64,
+            self.n_pub as u64,
+            self.consts.len() as u64,
+        ]);
+        let mut f: Vec<Field> = v.into_iter().map(Field::from).collect();
+        f.extend((0..C).map(|i| self.constant(i).0));
+        f.extend((0..C).map(|i| self.constant(i).1));
+        f
     }
+
+    /// The Poseidon2 hash of [`Self::fields`] (the position leaf's layout hash).
+    pub fn hash(&self) -> Field {
+        hash(&self.fields())
+    }
+}
+
+/// A family's constant binding: the record index and the value it must carry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConstSpec {
+    /// Record index.
+    pub index: usize,
+    /// The value (big-endian).
+    pub value: [u8; 32],
 }
 
 /// A family's link declaration: the record index and the link type's name.
@@ -135,6 +157,8 @@ pub struct FamilyEntry {
     pub link_out: Option<LinkSpec>,
     /// Bindings to public slots.
     pub binds: &'static [BindSpec],
+    /// Constant bindings.
+    pub consts: &'static [ConstSpec],
     /// Record index the public fields start at.
     pub public_from: usize,
     /// The public fields' slot names, from `public_from`.
@@ -172,7 +196,7 @@ impl FamilyEntry {
                     })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        if binds.len() > B || self.public_from + self.slots.len() > R {
+        if binds.len() > B || self.consts.len() > C || self.public_from + self.slots.len() > R {
             return Err(Error::Abi(format!(
                 "{}: exceeds the kernel's bounds",
                 self.id
@@ -184,6 +208,11 @@ impl FamilyEntry {
             binds,
             pub_from: self.public_from,
             n_pub: self.slots.len(),
+            consts: self
+                .consts
+                .iter()
+                .map(|c| (c.index, crate::codec::field_from_be_bytes(&c.value)))
+                .collect(),
         })
     }
 }
@@ -409,7 +438,11 @@ mod tests {
                     index: 2,
                 },
             ],
-            public_from: 3,
+            consts: &[ConstSpec {
+                index: 3,
+                value: [7; 32],
+            }],
+            public_from: 4,
             slots: &["c_id0", "c_id1"],
             root: [0; 32],
         };
@@ -417,10 +450,21 @@ mod tests {
         assert_eq!(l.binds, vec![(1, 1), (2, 2)]);
         assert_eq!(
             (l.link_in, l.link_out, l.pub_from, l.n_pub),
-            (Some(0), None, 3, 2)
+            (Some(0), None, 4, 2)
+        );
+        assert_eq!(
+            l.consts,
+            vec![(3, crate::codec::field_from_be_bytes(&[7; 32]))]
         );
         assert!(f.layout(&["a"]).is_err(), "ctx not published");
         assert_ne!(l.hash(), f.layout(&["ctx", "c_t"]).unwrap().hash());
-        assert_eq!(l.fields().len(), 3 + 2 * B + 2);
+        let mut other = l.clone();
+        other.consts[0].1 = Field::from(8u64);
+        assert_ne!(
+            l.hash(),
+            other.hash(),
+            "the constant's value is in the layout"
+        );
+        assert_eq!(l.fields().len(), 3 + 2 * B + 3 + 2 * C);
     }
 }

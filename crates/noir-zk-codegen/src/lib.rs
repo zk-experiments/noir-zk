@@ -439,13 +439,14 @@ pub fn wrapped(
         };
         writeln!(
             out,
-            "\n[[family]]\nlayer = {:?}\nname = {:?}\nmembers = [{}]\npublic_from = {}\nslots = [{}]\nbinds = [{}]",
+            "\n[[family]]\nlayer = {:?}\nname = {:?}\nmembers = [{}]\npublic_from = {}\nslots = [{}]\nbinds = [{}]\nbind_const = [{}]",
             f.id.layer,
             f.id.family,
             f.members.iter().map(|(l, _)| format!("{l:?}")).collect::<Vec<_>>().join(", "),
             f.public_from,
             f.slots.iter().map(|s| format!("{s:?}")).collect::<Vec<_>>().join(", "),
             f.binds.iter().map(|b| format!("{{ slot = {:?}, index = {} }}", b.slot, b.index)).collect::<Vec<_>>().join(", "),
+            f.consts.iter().map(|c| format!("{{ index = {}, value = \"0x{}\" }}", c.index, hex::encode(c.value))).collect::<Vec<_>>().join(", "),
         )
         .ok();
         if f.link_in.is_some() {

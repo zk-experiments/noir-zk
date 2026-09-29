@@ -44,6 +44,8 @@ pub global R: u32 = 16;
 pub global P: u32 = 32;
 /// Bindings per position.
 pub global B: u32 = 2;
+/// Constant bindings per position.
+pub global C: u32 = 2;
 /// A layout index meaning "none".
 pub global NONE: u32 = R;
 
@@ -102,6 +104,11 @@ pub struct Layout {
     /// The public outputs: `record[pub_from .. pub_from + n_pub]`, appended to the slots.
     pub pub_from: u32,
     pub n_pub: u32,
+    /// Constant bindings: `record[const_index[i]] == const_value[i]` for
+    /// `i < n_const` (a family pins a record field to a constant).
+    pub n_const: u32,
+    pub const_index: [u32; C],
+    pub const_value: [Field; C],
 }
 
 impl Layout {
@@ -116,6 +123,11 @@ impl Layout {
             self.bind_index[1] as Field,
             self.pub_from as Field,
             self.n_pub as Field,
+            self.n_const as Field,
+            self.const_index[0] as Field,
+            self.const_index[1] as Field,
+            self.const_value[0],
+            self.const_value[1],
         ])
     }
 }
@@ -156,6 +168,16 @@ pub fn apply(prev: [Field; STATE_FIELDS], step: [Field; R], l: Layout) -> [Field
                 prev[S_SLOTS + l.bind_slot[i]],
                 step[l.bind_index[i]],
                 "app output differs from the public slot it is bound to",
+            );
+        }
+    }
+    assert(l.n_const <= C, "too many constant bindings");
+    for i in 0..C {
+        if i < l.n_const {
+            assert_eq(
+                step[l.const_index[i]],
+                l.const_value[i],
+                "app output differs from the constant its family pins",
             );
         }
     }

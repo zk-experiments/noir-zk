@@ -15,7 +15,7 @@ fn main() {
     let Ok(text) = std::fs::read_to_string(dir.join("circuits/manifest.toml")) else {
         std::fs::write(
             out.join("kernels.rs"),
-            "pub const LIBRARY: noir_zk_core::Library = noir_zk_core::Library { name: \"noir-zk-kernels\", version: \"\" };\npub const KERNELS: &[noir_zk_core::RegistryEntry] = &[];\npub const ASSETS: &[(&str, &[u8])] = &[];\npub static FAMILY: noir_zk_core::FamilyEntry = noir_zk_core::FamilyEntry { id: noir_zk_core::FamilyRef { library: \"noir-zk-kernels\", layer: \"kernels\", family: \"step\" }, version: \"\", members: &[], record_fields: 0, link_in: None, link_out: None, binds: &[], public_from: 0, slots: &[], root: [0; 32] };\n",
+            "pub const LIBRARY: noir_zk_core::Library = noir_zk_core::Library { name: \"noir-zk-kernels\", version: \"\" };\npub const KERNELS: &[noir_zk_core::RegistryEntry] = &[];\npub const ASSETS: &[(&str, &[u8])] = &[];\npub static FAMILY: noir_zk_core::FamilyEntry = noir_zk_core::FamilyEntry { id: noir_zk_core::FamilyRef { library: \"noir-zk-kernels\", layer: \"kernels\", family: \"step\" }, version: \"\", members: &[], record_fields: 0, link_in: None, link_out: None, binds: &[], consts: &[], public_from: 0, slots: &[], root: [0; 32] };\n",
         )
         .expect("kernels.rs");
         return;
@@ -94,7 +94,7 @@ fn main() {
     let root =
         noir_zk_core::codec::field_to_be_bytes32(&noir_zk_core::tree::family_root(id, &fields));
     code.push_str(&format!(
-        "/// The kernels' family: `{name}/kernels/step` at version {version}.\npub static FAMILY: noir_zk_core::FamilyEntry = noir_zk_core::FamilyEntry {{\n    id: noir_zk_core::FamilyRef {{ library: {name:?}, layer: \"kernels\", family: \"step\" }},\n    version: {version:?},\n    members: &[{family_members}],\n    record_fields: 0,\n    link_in: None,\n    link_out: None,\n    binds: &[],\n    public_from: 0,\n    slots: &[],\n    root: [{}],\n}};\n",
+        "/// The kernels' family: `{name}/kernels/step` at version {version}.\npub static FAMILY: noir_zk_core::FamilyEntry = noir_zk_core::FamilyEntry {{\n    id: noir_zk_core::FamilyRef {{ library: {name:?}, layer: \"kernels\", family: \"step\" }},\n    version: {version:?},\n    members: &[{family_members}],\n    record_fields: 0,\n    link_in: None,\n    link_out: None,\n    binds: &[],\n    consts: &[],\n    public_from: 0,\n    slots: &[],\n    root: [{}],\n}};\n",
         hex32(&hex::encode(root)),
     ));
     std::fs::write(out.join("kernels.rs"), code).expect("kernels.rs");
