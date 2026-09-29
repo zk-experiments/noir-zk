@@ -13,20 +13,21 @@ Toolchain: Noir `1.0.0-rc.3` (the linked ACVM), Barretenberg `7.0.0-nightly.2026
 
 | Crate | What it does |
 | --- | --- |
-| `noir-zk-core` | `Field` (BN254 `Fr`), the `Circuit` trait (typed `Witness` / `PublicInputs` / `Outputs`), `CircuitId` with its `ProofSystem`, `Honk`, the fold traits `App` / `Kernel` / `Wrapped` / `AppDispatch`, the `FieldEncode` / `FromFields` codec, `RegistryEntry` / `Status`, and the `Artifacts` trait (bytecode, ABI, key, key-tree path). |
-| `noir-zk-codegen` | Build-dependency generator: typed inputs and outputs from nargo ABIs (`generate_types`), or a frozen registry (`generate_registry`) where every circuit also gets `CircuitId` with its embedded key, `App` or `Kernel` (kernels also get `wrap` / `select`), and a `Registry` with static label dispatch. |
-| `noir-zk-backend` | Typed UltraHonk (`honk::UltraHonk`, `honk::HonkVerifier`), typed folding (`fold::Folding`, `fold::verify`), ACVM witness solving (`witness`), Chonk prove / verify / key derivation (`chonk`), SRS loading (`srs`), and `Frozen<S>`: a generated registry as `Artifacts`, bytecode from an `ArtifactStore` checked against its pinned SHA-256. |
-| `noir-zk-cli` | `noir-zk freeze`: mints circuit versions from nargo output, reads each circuit's proof system off its ABI, and derives its key. |
+| `noir-zk-core` | `Field` (BN254 `Fr`), the `Circuit` trait (typed `Witness` / `PublicInputs` / `Outputs`), `CircuitId` with its `ProofSystem`, `Honk`, the fold traits `App` / `Kernel` / `Wrapped` / `AppDispatch`, the `FieldEncode` / `FromFields` codec, `RegistryEntry` / `Status` / `Library`, the layered types (`FamilyEntry`, `PipelineEntry`, `DeploymentEntry`, `Layout`, `StepFamily`, the link traits), the key trees (`tree`) and the `Artifacts` trait with `Merged`. |
+| `noir-zk-codegen` | Build-dependency generator: typed inputs and outputs from nargo ABIs (`generate_types`), or a frozen registry (`generate_registry`) where every circuit also gets `CircuitId` with its embedded key, `App` or `Kernel` (kernels also get `wrap` / `select`), a `Registry` with static label dispatch, and, for a layered registry, `FAMILIES` with a marker type per family, `pipelines::<name>` (root, typed `Outputs`, `fold`, `verify`), `DEPLOYMENT` and a test recomputing every root; `wrapped` exports a registry for another to wrap. |
+| `noir-zk-backend` | Typed UltraHonk (`honk::UltraHonk`, `honk::HonkVerifier`), typed folding of hand-written kernels (`fold::Folding`, `fold::verify`), pipeline folding with the generic kernels (`pipeline::PipelineFold`, `pipeline::verify`), ACVM witness solving (`witness`), Chonk prove / verify / key derivation (`chonk`), SRS loading (`srs`), and `Frozen<S>`: a generated registry as `Artifacts`, bytecode from an `ArtifactStore` (`DirStore`, `BundledStore`, `LayerStore`, `HttpStore`) checked against its pinned SHA-256. |
+| `noir-zk-kernels` | The generic pipeline kernels (`kernel_init`, `kernel_step`, `kernel_tail`, `kernel_hiding`): Noir source, frozen keys and bundled bytecode, versioned with noir-zk. |
+| `noir-zk-cli` | `noir-zk freeze`: mints circuit versions from nargo output, reads each circuit's proof system off its ABI, derives its key and its key hash, and keeps the families and pipelines you declare. |
 | `noir-zk-fixtures` | Test-only: a small UltraHonk circuit frozen and bound like a consumer's, proved end to end (`mise run fixtures` refreezes it). |
 
 ## Using it from a circuit repository
 
-1. Compile the circuits (`nargo compile --workspace`). For Chonk, also build the Poseidon2 verification key tree the kernels check (`vk-tree.json`: `root`, and `leaves` with `package`, `vk_hash`, `index`, `siblings`).
+1. Compile the circuits (`nargo compile --workspace`). For hand-written Chonk kernels checking one key tree, also build that tree (`vk-tree.json`: `root`, and `leaves` with `package`, `vk_hash`, `index`, `siblings`); pipelines folded by the generic kernels need none (below).
 2. Freeze them into a bindings crate:
 
    ```sh
    cargo install --locked noir-zk-cli
-   noir-zk freeze --target target --out rust/my-zk --assets target/release-assets [--vk-tree vk-tree.json] [--exclude bench_]
+   noir-zk freeze --target target --out rust/my-zk --assets target/release-assets --library my-lib@1.0.0 [--vk-tree vk-tree.json] [--exclude bench_]
    ```
 
    The bindings crate then holds `circuits/manifest.toml` and `resources/` (ABIs, keys, the tree). The bytecode goes to `--assets` as `<label>@<version>.b64`, to be uploaded as release assets. It is too large for git.
@@ -78,6 +79,60 @@ For typed inputs without freezing, `noir_zk_codegen::generate_types(&nargo_targe
 The code carries the pins: every generated circuit has `BYTECODE_SHA256` and `VK_SHA256` (and the key itself, `VK_BYTES`), and `REGISTRY` lists both hashes for every version. freeze records them in the manifest; codegen fails the build if `vk_sha256` doesn't match the embedded key. So anything downloaded (a pack, a single asset) can be checked against the code, whatever host served it.
 
 Versioning is per circuit. A new circuit starts at `1.0.0`. Changed bytecode with the same ABI gets a patch bump. An ABI change is refused without `--abi-change`, which makes a minor bump. The superseded version is marked `deprecated` and loses its ABI but keeps its key and asset. Each derived key's Poseidon2 hash is checked against the tree before anything is written. `--check` writes nothing and fails if the registry is behind the compiled circuits.
+
+## Layers, families and pipelines
+
+A circuit library that wants its circuits folded by others, or that folds circuits of others, declares them in its manifest as *layers* of *families* and *pipelines*, and folds them with the generic kernels of `noir-zk-kernels` instead of writing its own. No key tree file is involved: every root is computed from the pinned keys, in `build.rs` and again at run time.
+
+**Families.** A family is one or more circuits that return the same record through the databus (a single-circuit family is normal). A `[[family]]` table in `circuits/manifest.toml` names it, lists its members (labels, or `prefix*` over the registry's active circuits), and declares its *kernel step*: which record index continues the pipeline's link and the link's type name (`link_in`), which index becomes the next link (`link_out`), which indices must equal public slots earlier positions published (`binds`, by slot name), and which contiguous range is public with its slot names (`public_from`, `slots`).
+
+```toml
+[library]            # written by `noir-zk freeze --library my-lib@1.0.0`
+name = "my-lib"
+version = "1.0.0"
+
+[[family]]
+layer = "base"
+name = "counter"
+members = ["counter_*"]
+link_in = { index = 0, link = "Seed" }
+link_out = { index = 1, link = "Count" }
+public_from = 2
+slots = ["n"]
+
+[[family]]           # a family of another registry, wrapped
+layer = "ext"
+name = "sum"
+source = "lib-b"     # a name passed to codegen, or a file written by `noir_zk_codegen::wrapped`
+                     # (members, links, bindings and slots come with it)
+
+[[pipeline]]
+name = "seed_count_sum"
+positions = ["my-lib/base/seed", "my-lib/base/counter", "lib-b/ext/sum"]
+```
+
+**Trees, domain-separated.** A family's root is `H("noir-zk/family/v1", H(library, version, layer, family), tree)` where `tree` is a Poseidon2 Merkle tree of height 8 over the sorted key hashes of its members: the same circuit in two libraries or versions gives different roots, and a one-circuit family is a one-leaf tree with that prefix. A pipeline's tree (height 4) has one leaf per position, `H("noir-zk/position/v1", position, family_root, H(layout))`, and the kernels' family at the last leaf; a registry's *deployment* tree (height 4) is over the pipeline roots it declares, in order. Limits: 256 circuits per family, 15 positions per pipeline, 16 pipelines per deployment; the kernels' state has 24 public slots, records at most 16 fields, a position at most 2 bindings.
+
+**Kernels.** `kernel_step` folds the previous kernel and the app at the state's position: it checks the app's key in its family tree (with the family's identity, giving the family root) and the family at that position with that layout in the pipeline tree, then applies the layout (link check, bindings, the public range appended to the slots). `kernel_init` does the same for the first app (Chonk's first proof) and takes the pipeline root; `kernel_hiding` proves the pipeline root is a leaf of the deployment tree and publishes `deployment_root`, `pipeline_root`, `length` (the positions folded) and the slots; `kernel_tail` only pads a one-app pipeline to Chonk's minimum of four circuits. They are frozen in `noir-zk-kernels` (bytecode bundled), and every pipeline tree commits to their family.
+
+**Codegen.** From the manifest, `generate_registry` emits, besides the per-circuit types: `LIBRARY`; `FAMILIES` and one marker type per family (`families::KernelStep<Name>`, a `StepFamily` with the family's record type and link types); `links` (unit types for the link names); `pipelines::<name>` with `ROOT`, `PIPELINE`, an `Outputs` struct with a field per slot, `fold(&dyn Artifacts)` and `verify(&FoldedProof) -> Outputs`; `DEPLOYMENT` and `DEPLOYMENT_ROOT`; and a test that recomputes every root at run time. Roots are computed in `build.rs` with the same Poseidon2 as the runtime (`noir_zk_core::tree`). A combining crate wraps other libraries' registries with `noir_zk_codegen::wrapped(LIBRARY, REGISTRY, FAMILIES)` from its `build.rs` (`Options::sources`), or from a file for a registry frozen with an older noir-zk (a tool derives the key hashes and commits it).
+
+**Folding.** The pool a fold draws from is `Merged::new(&[&lib_a, &lib_b, &Kernels])`; the chain is typed by the families' links:
+
+```rust
+let (proof, _) = seed_count_sum::fold(&pool)?
+    .app(KernelStepSeed::select("seed", seed_toml)?)?
+    .app(KernelStepCounter::select("counter_big", counter_toml)?)?   // any member, chosen at run time
+    .app(KernelStepSum::select("sum", sum_toml)?)?
+    .hiding(&DEPLOYMENT)?;
+let out = seed_count_sum::verify(&proof)?;   // out.n, out.total: the slots by name
+```
+
+`.app(..)` compiles only if the family's `LinkIn` accepts the link the previous position left (`Seed` after a seed, `Count` after a counter; `NoLink` accepts anything); a wrong family for the position, a member outside the family, a wrong link value or binding value is refused at run time (the kernel's witness is unsatisfiable, so no proof exists). `examples/pipelines` is a workspace of two toy libraries and a combining crate with three pipelines, folded and verified in-process (`NOIR_ZK_PROVE=1 cargo test`), with the compile-fail cases as doctests.
+
+**Loading strategies.** A registry's bytecode comes from an `ArtifactStore`: `BundledStore(ASSETS)` (codegen's `Options::bundle` includes the bytecode of the named layers with `include_bytes!`), `DirStore` (a directory of assets or an unpacked pack), `HttpStore` (feature `http`) or packs from a catalog host (`pack::ensure`, features `packs` + `http`, checked against the catalog and then the pins), a `LayerStore` routing each layer to its own store, or any type implementing `ArtifactStore` (runtime injection).
+
+**Verifier contract.** A verifier pins one deployment root and the hiding kernel's key. A proof's first public field is the deployment root, the second the pipeline root (which identifies the slot layout: `pipelines::<name>::verify` checks it against the pipeline's constant), the third the length, then the slots. Adding a variant to a family changes that family's root and every pipeline root using it; adding a pipeline changes the deployment root only.
 
 ## Proof systems
 

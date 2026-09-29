@@ -118,6 +118,8 @@ jobs:
             -A clippy::unwrap_used -A clippy::expect_used -A clippy::panic
       - name: cargo test
         run: cargo test --all-features
+      - name: examples (pipelines workspace)
+        run: cd examples/pipelines && cargo test
 
   typos:
     name: typos
