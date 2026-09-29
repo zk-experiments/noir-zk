@@ -2,27 +2,32 @@
 //! their keys.
 //!
 //! Inputs: nargo's `target/` (`<label>.json` per circuit; `--exclude`
-//! prefixes skip some) and, for Chonk kernels, the Poseidon2 verification key
-//! tree they check (`--vk-tree`: `root`, and `leaves` with `package`,
-//! `vk_hash`, `index`, `siblings`). Everything is frozen into `--out` (the
-//! crate that runs `noir_zk_codegen::generate_registry` from its `build.rs`):
+//! prefixes skip some) and, for hand-written Chonk kernels checking one key
+//! tree, that tree (`--vk-tree`: `root`, and `leaves` with `package`,
+//! `vk_hash`, `index`, `siblings`; optional). Everything is frozen into
+//! `--out` (the crate that runs `noir_zk_codegen::generate_registry` from
+//! its `build.rs`):
 //!
 //! - `resources/circuits/<label>/<version>/abi.json` and `circuit.vk` (the
 //!   verification key, derived through the FFI);
-//! - `circuits/manifest.toml`: one `[[circuit]]` per version with its proof
-//!   system, status, `bytecode_sha256` and `vk_sha256` (the pins a client
-//!   checks downloads against);
-//! - `resources/vk-tree.json`, checked leaf by leaf: the Poseidon2 hash of
-//!   each derived key must be the tree's;
+//! - `circuits/manifest.toml`: `[library]` (name and version, from
+//!   `--library NAME@VERSION` the first time), one `[[circuit]]` per version
+//!   with its proof system, status, `bytecode_sha256`, `vk_sha256` (the pins
+//!   a client checks downloads against) and `vk_hash` (the Poseidon2 hash of
+//!   the key as fields: the family trees' leaf), plus the `[[family]]` and
+//!   `[[pipeline]]` tables you write (freeze keeps them and checks that every
+//!   family member is an active circuit);
+//! - `resources/vk-tree.json` when `--vk-tree` is given, checked leaf by leaf;
 //! - `--assets`/`<label>@<version>.b64`: the bytecode, published as release
 //!   assets (too large for git) and fetched by hash.
 //!
 //! The proof system comes from the ABI: a circuit using the databus is folded
 //! by Chonk (UltraHonk rejects databus circuits) as a kernel if its parameters
 //! follow the kernel convention (`prev`, `step`, `prev_vk`, `step_vk`,
-//! `vk_tree_root`) — the hiding kernel if it returns `pub` — else as an app.
-//! Any other circuit is proved by UltraHonk with the `--honk-oracle`
-//! transcript hash (default `poseidon2`; `keccak` for EVM verifiers).
+//! `vk_tree_root`, and the pipeline kernels' `layout` and `deployment`) —
+//! the hiding kernel if it returns `pub` — else as an app. Any other circuit
+//! is proved by UltraHonk with the `--honk-oracle` transcript hash (default
+//! `poseidon2`; `keccak` for EVM verifiers).
 //!
 //! Versions: an unchanged bytecode is skipped; a changed bytecode with the
 //! same ABI is a patch bump; an ABI change needs `--abi-change` (minor). The
@@ -51,6 +56,7 @@ fn fail(msg: impl std::fmt::Display) -> ! {
 
 struct Opts {
     target: PathBuf,
+    library: Option<(String, String)>,
     vk_tree: Option<PathBuf>,
     out: PathBuf,
     assets: PathBuf,
@@ -63,7 +69,15 @@ struct Opts {
 /// First lines of every manifest freeze writes.
 const MANIFEST_HEADER: &str = "# Written by noir-zk freeze; do not edit.\n\n";
 
-const KERNEL_PARAMS: [&str; 5] = ["prev", "step", "prev_vk", "step_vk", "vk_tree_root"];
+const KERNEL_PARAMS: [&str; 7] = [
+    "prev",
+    "step",
+    "prev_vk",
+    "step_vk",
+    "vk_tree_root",
+    "layout",
+    "deployment",
+];
 
 /// The proof system a circuit's ABI calls for (see the module docs).
 fn system_of(label: &str, abi: &serde_json::Value, oracle: Oracle) -> ProofSystem {
@@ -135,7 +149,8 @@ struct Compiled {
     noir: String,
 }
 
-const USAGE: &str = "usage: noir-zk freeze --target DIR --out DIR --assets DIR \
+const USAGE: &str =
+    "usage: noir-zk freeze --target DIR --out DIR --assets DIR [--library NAME@VERSION] \
 [--vk-tree FILE] [--exclude PREFIX].. [--honk-oracle poseidon2|keccak] [--check | --abi-change]
        noir-zk pack --out DIR --assets DIR --packs FILE --dest DIR [--version V]";
 
@@ -151,6 +166,7 @@ fn main() {
     }
     let mut o = Opts {
         target: PathBuf::new(),
+        library: None,
         vk_tree: None,
         out: PathBuf::new(),
         assets: PathBuf::new(),
@@ -171,6 +187,13 @@ fn main() {
             "--abi-change" => o.abi_change = true,
             "--target" => o.target = val().into(),
             "--vk-tree" => o.vk_tree = Some(val().into()),
+            "--library" => {
+                let v = val();
+                let (name, version) = v
+                    .split_once('@')
+                    .unwrap_or_else(|| fail("--library takes NAME@VERSION"));
+                o.library = Some((name.to_string(), version.to_string()));
+            }
             "--out" => o.out = val().into(),
             "--assets" => o.assets = val().into(),
             "--exclude" => o.exclude.push(val()),
@@ -383,17 +406,19 @@ fn freeze(o: &Opts) {
         .iter()
         .filter_map(|l| Some((l["package"].as_str()?, l["vk_hash"].as_str()?)))
         .collect();
-    // Kernels check every app and kernel they fold against the key tree.
-    for c in &compiled {
-        if matches!(
-            c.system,
-            ProofSystem::Chonk(ChonkRole::App | ChonkRole::Kernel)
-        ) && !tree_hashes.contains_key(c.label.as_str())
-        {
-            fail(format!(
-                "{}: a Chonk app or kernel must be a leaf of --vk-tree",
-                c.label
-            ));
+    // With a key tree, every Chonk app and kernel must be one of its leaves.
+    if o.vk_tree.is_some() {
+        for c in &compiled {
+            if matches!(
+                c.system,
+                ProofSystem::Chonk(ChonkRole::App | ChonkRole::Kernel)
+            ) && !tree_hashes.contains_key(c.label.as_str())
+            {
+                fail(format!(
+                    "{}: a Chonk app or kernel must be a leaf of --vk-tree",
+                    c.label
+                ));
+            }
         }
     }
 
@@ -408,12 +433,16 @@ fn freeze(o: &Opts) {
     let mut active: BTreeMap<String, (usize, String, String)> = BTreeMap::new();
     let mut recorded: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     let mut vk_pins: BTreeMap<String, String> = BTreeMap::new();
+    let mut vk_hashes: BTreeMap<String, String> = BTreeMap::new();
     if let Some(arr) = doc.get("circuit").and_then(|c| c.as_array_of_tables()) {
         for (i, t) in arr.iter().enumerate() {
             if t.get("status").and_then(|s| s.as_str()) == Some("active") {
                 let label = t["label"].as_str().unwrap_or_default().to_string();
                 if let Some(pin) = t.get("vk_sha256").and_then(|v| v.as_str()) {
                     vk_pins.insert(label.clone(), pin.to_string());
+                }
+                if let Some(h) = t.get("vk_hash").and_then(|v| v.as_str()) {
+                    vk_hashes.insert(label.clone(), h.to_string());
                 }
                 recorded.insert(
                     label.clone(),
@@ -438,7 +467,8 @@ fn freeze(o: &Opts) {
     }
 
     let (mut minted, mut failed) = (0usize, 0usize);
-    let mut new_entries: Vec<(String, String, ProofSystem, String, String)> = vec![];
+    let mut new_entries: Vec<(String, String, ProofSystem, String, String, Option<String>)> =
+        vec![];
     let mut deprecate: Vec<usize> = vec![];
     for c in &compiled {
         let prev = active.get(&c.label);
@@ -474,6 +504,15 @@ fn freeze(o: &Opts) {
                             c.label
                         );
                         failed += 1;
+                    }
+                    if let Some(h) = vk_hash_of(c, &committed) {
+                        if vk_hashes.get(&c.label) != Some(&h) {
+                            eprintln!(
+                                "{}@{v}: recorded vk_hash is missing or differs from the committed key",
+                                c.label
+                            );
+                            failed += 1;
+                        }
                     }
                 }
                 continue;
@@ -526,12 +565,14 @@ fn freeze(o: &Opts) {
         std::fs::create_dir_all(&dir).unwrap_or_else(|e| fail(e));
         std::fs::write(dir.join("abi.json"), format!("{}\n", c.abi)).unwrap_or_else(|e| fail(e));
         std::fs::write(dir.join("circuit.vk"), &vk).unwrap_or_else(|e| fail(e));
+        let vk_hash = vk_hash_of(c, &vk);
         new_entries.push((
             c.label.clone(),
             version,
             c.system,
             c.sha.clone(),
             hex::encode(Sha256::digest(&vk)),
+            vk_hash,
         ));
         minted += 1;
     }
@@ -550,6 +591,15 @@ fn freeze(o: &Opts) {
     }
     doc["noir"] = value(compiled.first().map_or("unknown", |c| c.noir.as_str()));
     doc["bb"] = value(noir_zk_backend::BB_VERSION);
+    if let Some((name, version)) = &o.library {
+        let mut lib = Table::new();
+        lib["name"] = value(name);
+        lib["version"] = value(version);
+        doc["library"] = toml_edit::Item::Table(lib);
+    }
+    if doc.get("library").is_none() {
+        fail("the manifest has no [library]: pass --library NAME@VERSION the first time");
+    }
     match tree["root"].as_str() {
         Some(root) => doc["vk_tree_root"] = value(root),
         None => {
@@ -578,7 +628,7 @@ fn freeze(o: &Opts) {
             t["vk_sha256"] = value(hex::encode(Sha256::digest(&vk)));
         }
     }
-    for (label, version, system, sha, vk_sha) in new_entries {
+    for (label, version, system, sha, vk_sha, vk_hash) in new_entries {
         let mut t = Table::new();
         t["label"] = value(label);
         t["version"] = value(version);
@@ -588,7 +638,65 @@ fn freeze(o: &Opts) {
         t["status"] = value("active");
         t["bytecode_sha256"] = value(sha);
         t["vk_sha256"] = value(vk_sha);
+        if let Some(h) = vk_hash {
+            t["vk_hash"] = value(h);
+        }
         arr.push(t);
+    }
+    // Every active Chonk entry records its key hash (entries frozen before
+    // this field existed get it from their committed key).
+    for t in arr.iter_mut() {
+        if t.get("status").and_then(|s| s.as_str()) != Some("active")
+            || t.get("vk_hash").is_some()
+            || t.get("system").and_then(|s| s.as_str()) != Some("chonk")
+        {
+            continue;
+        }
+        let (label, version) = (
+            t["label"].as_str().unwrap_or_default().to_string(),
+            t["version"].as_str().unwrap_or_default().to_string(),
+        );
+        let role = match t.get("role").and_then(|r| r.as_str()) {
+            Some("kernel") => ChonkRole::Kernel,
+            Some("hiding") => ChonkRole::Hiding,
+            _ => ChonkRole::App,
+        };
+        let vk =
+            std::fs::read(out.join(format!("resources/circuits/{label}/{version}/circuit.vk")))
+                .unwrap_or_else(|e| fail(format!("{label}@{version}: circuit.vk: {e}")));
+        let fields = chonk::vk_fields(&vk, role).unwrap_or_else(|e| fail(format!("{label}: {e}")));
+        t["vk_hash"] = value(hex_field(&noir_zk_core::tree::hash(&fields)));
+    }
+    // The families you declared: every member must be an active circuit.
+    let active_labels: Vec<String> = arr
+        .iter()
+        .filter(|t| t.get("status").and_then(|s| s.as_str()) == Some("active"))
+        .filter_map(|t| t.get("label").and_then(|l| l.as_str()).map(str::to_string))
+        .collect();
+    for f in doc
+        .get("family")
+        .and_then(|f| f.as_array_of_tables())
+        .into_iter()
+        .flatten()
+    {
+        if f.get("source").is_some() {
+            continue;
+        }
+        for m in f
+            .get("members")
+            .and_then(|m| m.as_array())
+            .into_iter()
+            .flatten()
+        {
+            let m = m.as_str().unwrap_or_default();
+            if let Some(prefix) = m.strip_suffix('*') {
+                if !active_labels.iter().any(|l| l.starts_with(prefix)) {
+                    fail(format!("family member {m:?} matches no active circuit"));
+                }
+            } else if !active_labels.iter().any(|l| l == m) {
+                fail(format!("family member {m:?} is not an active circuit"));
+            }
+        }
     }
     std::fs::create_dir_all(manifest_path.parent().unwrap_or(out)).unwrap_or_else(|e| fail(e));
     std::fs::write(&manifest_path, format!("{MANIFEST_HEADER}{doc}")).unwrap_or_else(|e| fail(e));
@@ -630,6 +738,19 @@ fn freeze(o: &Opts) {
         versions.len(),
         assets.display()
     );
+}
+
+/// The Poseidon2 hash of a Chonk key as fields (the family trees' leaf); none
+/// for UltraHonk keys.
+fn vk_hash_of(c: &Compiled, vk: &[u8]) -> Option<String> {
+    match c.system {
+        ProofSystem::Chonk(role) => {
+            let fields =
+                chonk::vk_fields(vk, role).unwrap_or_else(|e| fail(format!("{}: {e}", c.label)));
+            Some(hex_field(&noir_zk_core::tree::hash(&fields)))
+        }
+        ProofSystem::UltraHonk(_) => None,
+    }
 }
 
 fn derive_vk(c: &Compiled) -> Vec<u8> {
