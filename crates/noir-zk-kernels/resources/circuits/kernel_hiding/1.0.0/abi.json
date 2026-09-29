@@ -19,7 +19,7 @@
       "name": "prev",
       "type": {
         "kind": "array",
-        "length": 28,
+        "length": 36,
         "type": {
           "kind": "field"
         }
@@ -154,7 +154,7 @@
           "name": "slots",
           "type": {
             "kind": "array",
-            "length": 24,
+            "length": 32,
             "type": {
               "kind": "field"
             }

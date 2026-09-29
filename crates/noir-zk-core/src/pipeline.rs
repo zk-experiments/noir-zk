@@ -18,7 +18,7 @@ use std::marker::PhantomData;
 /// Record width (`kernel::R`): an app returns at most this many fields.
 pub const R: usize = 16;
 /// Public slots (`kernel::P`).
-pub const P: usize = 24;
+pub const P: usize = 32;
 /// Bindings per position (`kernel::B`).
 pub const B: usize = 2;
 /// The state between kernels.

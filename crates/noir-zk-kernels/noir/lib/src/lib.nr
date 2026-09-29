@@ -41,7 +41,7 @@ pub global ROLE_KERNEL: Field = 0xffffffff;
 /// An app record: an app's databus outputs, zero-padded to `R`.
 pub global R: u32 = 16;
 /// Public slots of a pipeline.
-pub global P: u32 = 24;
+pub global P: u32 = 32;
 /// Bindings per position.
 pub global B: u32 = 2;
 /// A layout index meaning "none".

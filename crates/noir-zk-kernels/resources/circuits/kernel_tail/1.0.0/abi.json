@@ -19,7 +19,7 @@
       "name": "prev",
       "type": {
         "kind": "array",
-        "length": 28,
+        "length": 36,
         "type": {
           "kind": "field"
         }
@@ -106,7 +106,7 @@
   "return_type": {
     "abi_type": {
       "kind": "array",
-      "length": 28,
+      "length": 36,
       "type": {
         "kind": "field"
       }
