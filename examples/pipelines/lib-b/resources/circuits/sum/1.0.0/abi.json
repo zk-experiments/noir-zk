@@ -1,0 +1,30 @@
+{
+  "abi_version": 1,
+  "error_types": {},
+  "parameters": [
+    {
+      "name": "c",
+      "type": {
+        "kind": "field"
+      },
+      "visibility": "private"
+    },
+    {
+      "name": "n",
+      "type": {
+        "kind": "field"
+      },
+      "visibility": "private"
+    }
+  ],
+  "return_type": {
+    "abi_type": {
+      "kind": "array",
+      "length": 3,
+      "type": {
+        "kind": "field"
+      }
+    },
+    "visibility": "databus"
+  }
+}

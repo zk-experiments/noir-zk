@@ -1,0 +1,6 @@
+[package]
+name = "sum"
+type = "bin"
+authors = [""]
+
+[dependencies]

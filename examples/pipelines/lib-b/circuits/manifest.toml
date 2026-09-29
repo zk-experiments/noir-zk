@@ -1,0 +1,44 @@
+# Written by noir-zk freeze; do not edit.
+
+noir = "1.0.0-rc.3"
+bb = "7.0.0-nightly.20260927"
+
+[[circuit]]
+label = "sum"
+version = "1.0.0"
+system = "chonk"
+role = "app"
+status = "active"
+bytecode_sha256 = "29eea66dc78e75499543251149ce28b42a065fa25ac99cb4ffe876a7ddf2d8aa"
+vk_sha256 = "297fbe41c3b00e8c7c2e32450dcc8719753ba0b7a12cda640e2450d944d0be7b"
+vk_hash = "0x2c19ec03edc87bb517c794a83862fd75e67e27f30d71f96afe15072bafd2aad0"
+
+[[circuit]]
+label = "tag"
+version = "1.0.0"
+system = "chonk"
+role = "app"
+status = "active"
+bytecode_sha256 = "a4e51d3a32cb2faf6d5820d1e27b928c7ba02c60a6e5161c22333418354d336c"
+vk_sha256 = "8385983166e2e6e299574f09be683e72e80aa812a4e82e722f711eddba9f4001"
+vk_hash = "0x1331d206e9976855a534d165912d2fd504e89f9a3666797b0ecb5a928e363063"
+
+[library]
+name = "lib-b"
+version = "1.0.0"
+
+[[family]]
+layer = "ext"
+name = "sum"
+members = ["sum"]
+link_in = { index = 0, link = "Count" }
+binds = [{ slot = "n", index = 1 }]
+public_from = 2
+slots = ["total"]
+
+[[family]]
+layer = "ext"
+name = "tag"
+members = ["tag"]
+public_from = 0
+slots = ["tag"]

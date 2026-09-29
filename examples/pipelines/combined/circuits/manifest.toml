@@ -1,0 +1,43 @@
+# A combining registry: no circuits of its own, families wrapped from
+# lib-a and lib-b (their definitions come with the wrapped registries), and
+# the pipelines it deploys.
+
+[library]
+name = "combined"
+version = "1.0.0"
+
+[[family]]
+layer = "base"
+name = "seed"
+source = "lib-a"
+
+[[family]]
+layer = "base"
+name = "counter"
+source = "lib-a"
+
+[[family]]
+layer = "ext"
+name = "sum"
+source = "lib-b"
+
+[[family]]
+layer = "ext"
+name = "tag"
+source = "lib-b"
+
+# seed -> counter -> sum: the links chain (Seed, Count) and sum binds the
+# counter's public `n`.
+[[pipeline]]
+name = "seed_count_sum"
+positions = ["lib-a/base/seed", "lib-a/base/counter", "lib-b/ext/sum"]
+
+# seed -> counter: the same first two positions, another root.
+[[pipeline]]
+name = "seed_count"
+positions = ["lib-a/base/seed", "lib-a/base/counter"]
+
+# One app: padded with kernel_tail.
+[[pipeline]]
+name = "tag_only"
+positions = ["lib-b/ext/tag"]
