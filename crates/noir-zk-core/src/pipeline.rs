@@ -329,7 +329,9 @@ macro_rules! links {
 pub mod links {
     crate::links!(
         /// A hiding commitment to a six-field payload, `H(domain, salt, payload)`,
-        /// as a payload envelope opens it (the domain is the committing library's).
+        /// as a payload envelope opens it (the domain is the committing library's
+        /// and names the size). Another payload size is another link type here,
+        /// with its own envelope instantiation and family in the libraries.
         PayloadCommitment,
     );
 }
