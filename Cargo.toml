@@ -1,9 +1,10 @@
 [workspace]
-members = ["crates/noir-zk-core", "crates/noir-zk-codegen", "crates/noir-zk-backend", "crates/noir-zk-cli", "crates/noir-zk-fixtures"]
+members = ["crates/noir-zk-core", "crates/noir-zk-kernels", "crates/noir-zk-codegen", "crates/noir-zk-backend", "crates/noir-zk-cli", "crates/noir-zk-fixtures"]
 resolver = "2"
+exclude = ["examples/pipelines"]
 
 [workspace.package]
-version = "0.2.1"
+version = "0.3.0-dev"
 edition = "2021"
 rust-version = "1.94"
 license = "MIT"
@@ -13,9 +14,10 @@ keywords = ["noir", "zk", "barretenberg", "chonk", "ultrahonk"]
 categories = ["cryptography"]
 
 [workspace.dependencies]
-noir-zk-core = { path = "crates/noir-zk-core", version = "=0.2.1" }
-noir-zk-codegen = { path = "crates/noir-zk-codegen", version = "=0.2.1" }
-noir-zk-backend = { path = "crates/noir-zk-backend", version = "=0.2.1" }
+noir-zk-core = { path = "crates/noir-zk-core", version = "=0.3.0-dev" }
+noir-zk-codegen = { path = "crates/noir-zk-codegen", version = "=0.3.0-dev" }
+noir-zk-backend = { path = "crates/noir-zk-backend", version = "=0.3.0-dev" }
+noir-zk-kernels = { path = "crates/noir-zk-kernels", version = "=0.3.0-dev" }
 ark-ff = { version = "0.6", default-features = false }
 ark-bn254 = { version = "0.6", default-features = false, features = ["curve"] }
 base64 = "0.22"
