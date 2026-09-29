@@ -18,6 +18,8 @@
 
 #![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)] // build-time codegen: fail loudly
 
+mod pipelines;
+
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -161,8 +163,11 @@ fn flatten(ty: &Value, expr: &str, depth: usize, out: &mut String) {
         Some("field") => writeln!(out, "{pad}v.push({expr});"),
         Some("boolean") | Some("integer") => writeln!(out, "{pad}v.push(Fr::from({expr}));"),
         Some("array") => {
+            // Iterate by reference so nested arrays (`*e0` is `[T; N]`) and
+            // struct elements both work: `for e1 in e0.iter()`.
             let var = format!("e{depth}");
-            writeln!(out, "{pad}for {var} in {expr}.iter() {{").ok();
+            let over = expr.strip_prefix('*').unwrap_or(expr);
+            writeln!(out, "{pad}for {var} in {over}.iter() {{").ok();
             flatten(&ty["type"], &format!("*{var}"), depth + 1, out);
             writeln!(out, "{pad}}}")
         }
@@ -229,8 +234,17 @@ pub fn nargo_target_abis(
     Ok(out)
 }
 
-/// `main` parameters a kernel may have (the noir-zk kernel convention).
-const KERNEL_PARAMS: [&str; 5] = ["prev", "step", "prev_vk", "step_vk", "vk_tree_root"];
+/// `main` parameters a kernel may have (the noir-zk kernel convention; the
+/// pipeline kernels add `layout` and `deployment`).
+const KERNEL_PARAMS: [&str; 7] = [
+    "prev",
+    "step",
+    "prev_vk",
+    "step_vk",
+    "vk_tree_root",
+    "layout",
+    "deployment",
+];
 
 /// Whether `abi` follows the kernel convention (every parameter is one of
 /// [`KERNEL_PARAMS`]).
@@ -370,19 +384,108 @@ pub fn generate_types(abis: &[CircuitAbi]) -> String {
     code
 }
 
+/// What [`generate_registry_with`] bundles: the bytecode of the active
+/// circuits of these layers (`"*"` for every layer), from `dir/assets`, as
+/// `ASSETS` (`include_bytes!`), for a `BundledStore`.
+#[derive(Clone, Debug, Default)]
+pub struct Options {
+    /// Layers to bundle.
+    pub bundle: Vec<String>,
+    /// Wrapped registries by name: a family with `source = "<name>"` reads
+    /// this text (see [`wrapped`]) instead of a file.
+    pub sources: Vec<(String, String)>,
+}
+
+/// A registry as another registry wraps it: its library, its circuits
+/// (label, key hash, record width) and its families, as TOML. A combining
+/// crate's `build.rs` calls it with a library's generated `LIBRARY`,
+/// `REGISTRY` and `FAMILIES` and passes the text as an [`Options`] source;
+/// a registry frozen with an older noir-zk is exported by a tool that
+/// derives the key hashes (`noir_zk_backend::chonk::vk_fields`) and commits
+/// the file.
+pub fn wrapped(
+    library: noir_zk_core::Library,
+    registry: &[noir_zk_core::RegistryEntry],
+    families: &[noir_zk_core::FamilyEntry],
+) -> String {
+    let mut out = format!(
+        "# Written by noir-zk-codegen (wrapped); do not edit.\nlibrary = {:?}\nversion = {:?}\n",
+        library.name, library.version
+    );
+    for e in registry
+        .iter()
+        .filter(|e| e.status == noir_zk_core::Status::Active)
+    {
+        let noir_zk_core::ProofSystem::Chonk(noir_zk_core::ChonkRole::App) = e.system else {
+            continue;
+        };
+        let record = e.abi.map_or(0, |abi| {
+            let v: Value = serde_json::from_str(abi).unwrap_or(Value::Null);
+            v["return_type"].get("abi_type").map_or(0, field_count)
+        });
+        writeln!(
+            out,
+            "\n[[circuit]]\nlabel = {:?}\nvk_hash = \"0x{}\"\nrecord_fields = {record}",
+            e.label,
+            hex::encode(e.vk_hash)
+        )
+        .ok();
+    }
+    for f in families {
+        let link = |l: &Option<noir_zk_core::LinkSpec>| {
+            l.map_or(String::new(), |l| {
+                format!(" index = {}, link = {:?} ", l.index, l.link)
+            })
+        };
+        writeln!(
+            out,
+            "\n[[family]]\nlayer = {:?}\nname = {:?}\nmembers = [{}]\npublic_from = {}\nslots = [{}]\nbinds = [{}]",
+            f.id.layer,
+            f.id.family,
+            f.members.iter().map(|(l, _)| format!("{l:?}")).collect::<Vec<_>>().join(", "),
+            f.public_from,
+            f.slots.iter().map(|s| format!("{s:?}")).collect::<Vec<_>>().join(", "),
+            f.binds.iter().map(|b| format!("{{ slot = {:?}, index = {} }}", b.slot, b.index)).collect::<Vec<_>>().join(", "),
+        )
+        .ok();
+        if f.link_in.is_some() {
+            writeln!(out, "link_in = {{{}}}", link(&f.link_in)).ok();
+        }
+        if f.link_out.is_some() {
+            writeln!(out, "link_out = {{{}}}", link(&f.link_out)).ok();
+        }
+    }
+    out
+}
+
 /// A frozen registry (written by `noir-zk freeze`): typed modules for every active
 /// circuit with its `CircuitId` (embedded key), `REGISTRY`, `VK_TREE_ROOT` and
 /// the toolchain versions, from `dir/circuits/manifest.toml`,
-/// `dir/resources/circuits` and `dir/resources/vk-tree.json` (if any). `dir` must be
-/// the host crate's `CARGO_MANIFEST_DIR` (the generated `include_bytes!`
-/// paths are relative to it).
+/// `dir/resources/circuits` and `dir/resources/vk-tree.json` (if any); and,
+/// when the manifest declares them, `LIBRARY`, `FAMILIES` with a marker type
+/// per family (`families::KernelStep*`), `pipelines::<name>` (root, typed
+/// `Outputs`, `fold`, `verify`), `DEPLOYMENT` and a test recomputing every
+/// root. `dir` must be the host crate's `CARGO_MANIFEST_DIR` (the generated
+/// `include_bytes!` paths are relative to it). Pipeline code uses
+/// `noir-zk-backend`, which the host crate must then depend on.
 pub fn generate_registry(dir: &Path) -> String {
+    generate_registry_with(dir, &Options::default())
+}
+
+/// [`generate_registry`] with [`Options`].
+pub fn generate_registry_with(dir: &Path, options: &Options) -> String {
     let manifest_path = dir.join("circuits/manifest.toml");
     let tree_path = dir.join("resources/vk-tree.json");
 
     let manifest: toml::Value =
         toml::from_str(&std::fs::read_to_string(&manifest_path).expect("manifest.toml"))
             .expect("parse manifest.toml");
+    let library = manifest.get("library").map(|l| {
+        (
+            l["name"].as_str().expect("library.name").to_string(),
+            l["version"].as_str().expect("library.version").to_string(),
+        )
+    });
     // No key tree for registries without Chonk kernels.
     let tree: Value = std::fs::read_to_string(&tree_path).map_or(Value::Null, |t| {
         serde_json::from_str(&t).expect("parse vk-tree.json")
@@ -411,17 +514,53 @@ pub fn generate_registry(dir: &Path) -> String {
         "// @generated by noir-zk-codegen from circuits/manifest.toml and resources/. Do not edit.\n\n",
     );
     for key in ["noir", "bb"] {
-        let v = manifest[key].as_str().expect("toolchain pin");
+        let v = manifest.get(key).and_then(|v| v.as_str()).unwrap_or("");
         writeln!(code, "/// {key} version the frozen artifacts were built with.\npub const {}_VERSION: &str = {v:?};", key.to_uppercase()).ok();
     }
     writeln!(code, "/// Root of the verification key tree the kernels check (zero without one).\npub const VK_TREE_ROOT: [u8; 32] = {};\n", manifest.get("vk_tree_root").map_or_else(|| hex32(&"0".repeat(64)), |r| hex32(r.as_str().expect("vk_tree_root")))).ok();
+
+    if let Some((name, version)) = &library {
+        writeln!(code, "/// The library this registry is frozen as.\npub const LIBRARY: noir_zk_core::Library = noir_zk_core::Library {{ name: {name:?}, version: {version:?} }};\n").ok();
+    }
+    // The families' view of the active circuits (record widths need the ABIs).
+    let mut actives: BTreeMap<String, pipelines::Active> = BTreeMap::new();
+    let mut assets: Vec<(String, String)> = vec![];
+    let family_of = |label: &str| -> (String, String) {
+        for f in manifest
+            .get("family")
+            .and_then(|f| f.as_array())
+            .into_iter()
+            .flatten()
+        {
+            if f.get("source").is_some() {
+                continue;
+            }
+            let members = f["members"].as_array().expect("members");
+            if members.iter().any(|m| {
+                let m = m.as_str().unwrap_or_default();
+                m.strip_suffix('*')
+                    .map_or(m == label, |p| label.starts_with(p))
+            }) {
+                return (
+                    f["layer"].as_str().unwrap_or_default().to_string(),
+                    f["name"].as_str().unwrap_or_default().to_string(),
+                );
+            }
+        }
+        (String::new(), String::new())
+    };
 
     let mut apps: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut kernels_with_step: Vec<(String, String)> = vec![];
     let mut registry = String::from(
         "/// Every frozen circuit version.\npub const REGISTRY: &[noir_zk_core::RegistryEntry] = &[\n",
     );
-    for c in manifest["circuit"].as_array().expect("[[circuit]]") {
+    for c in manifest
+        .get("circuit")
+        .and_then(|c| c.as_array())
+        .into_iter()
+        .flatten()
+    {
         let label = c["label"].as_str().expect("label");
         let version = c["version"].as_str().expect("version");
         let status = c["status"].as_str().expect("status");
@@ -483,9 +622,18 @@ pub fn generate_registry(dir: &Path) -> String {
             "deprecated" => "Deprecated",
             s => panic!("{label}: unknown status {s}"),
         };
+        let (layer, family) = if status == "active" {
+            family_of(label)
+        } else {
+            (String::new(), String::new())
+        };
+        let vk_hash_hex = c
+            .get("vk_hash")
+            .and_then(|h| h.as_str())
+            .map_or_else(|| hex32(&"0".repeat(64)), hex32);
         writeln!(
             registry,
-            "    noir_zk_core::RegistryEntry {{\n        label: {label:?},\n        version: {version:?},\n        system: {system},\n        status: noir_zk_core::Status::{status_v},\n        bytecode_sha256: {},\n        vk_sha256: {vk_sha},\n        abi: {},\n        vk: include_bytes!({}),\n        vk_index: {index},\n        vk_siblings: &[{siblings}],\n    }},",
+            "    noir_zk_core::RegistryEntry {{\n        label: {label:?},\n        version: {version:?},\n        system: {system},\n        status: noir_zk_core::Status::{status_v},\n        bytecode_sha256: {},\n        vk_sha256: {vk_sha},\n        vk_hash: {vk_hash_hex},\n        layer: {layer:?},\n        family: {family:?},\n        abi: {},\n        vk: include_bytes!({}),\n        vk_index: {index},\n        vk_siblings: &[{siblings}],\n    }},",
             hex32(c["bytecode_sha256"].as_str().expect("bytecode_sha256")),
             if status == "active" { format!("Some(include_str!({}))", res("abi.json")) } else { "None".into() },
             res("circuit.vk"),
@@ -498,6 +646,25 @@ pub fn generate_registry(dir: &Path) -> String {
         let abi: Value =
             serde_json::from_str(&std::fs::read_to_string(&abi_file).expect("abi.json"))
                 .expect("parse abi.json");
+        actives.insert(
+            label.to_string(),
+            pipelines::Active {
+                vk_hash: c
+                    .get("vk_hash")
+                    .and_then(|h| h.as_str())
+                    .map(str::to_string),
+                record_fields: abi["return_type"]
+                    .get("abi_type")
+                    .map_or(0, |r| usize::try_from(field_count(r)).unwrap()),
+                is_app: kind == "App",
+            },
+        );
+        if options.bundle.iter().any(|b| b == "*" || *b == layer) {
+            assets.push((
+                format!("{label}@{version}.b64"),
+                format!("assets/{label}@{version}.b64"),
+            ));
+        }
         let id = format!(
             "        const LABEL: &'static str = {label:?};\n        const VERSION: &'static str = {version:?};\n        const SYSTEM: noir_zk_core::ProofSystem = {system};\n        const BYTECODE_SHA256: [u8; 32] = {};\n        const VK_BYTES: &'static [u8] = include_bytes!({});\n        const VK_SHA256: [u8; 32] = {vk_sha};\n",
             hex32(c["bytecode_sha256"].as_str().expect("sha")),
@@ -555,6 +722,20 @@ pub fn generate_registry(dir: &Path) -> String {
         )
         .ok();
     }
+    if !options.bundle.is_empty() {
+        code.push_str("\n/// Bundled bytecode assets (`<label>@<version>.b64`), for a `BundledStore`.\npub const ASSETS: &[(&str, &[u8])] = &[\n");
+        for (asset, rel) in &assets {
+            writeln!(code, "    ({asset:?}, include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/{rel}\"))),").ok();
+        }
+        code.push_str("];\n");
+    }
+    if let Some(lib) = &library {
+        let families =
+            pipelines::families(dir, &manifest, (&lib.0, &lib.1), &actives, &options.sources);
+        let declared = pipelines::pipelines(&manifest, &families);
+        code.push('\n');
+        code.push_str(&pipelines::emit(&families, &declared));
+    }
     // Kernels that fold an app: wrap one, typed or chosen at runtime.
     for (label, step) in &kernels_with_step {
         let marker = format!("{label}::{}", camel(label));
@@ -606,6 +787,24 @@ mod tests {
         assert!(code.contains("pub bytes: [u8; 2],"));
         assert!(code.contains("pub struct DemoCircuit;"));
         assert!(code.contains("pub const OUTPUT_FIELDS: usize = 3;"));
+    }
+
+    #[test]
+    fn flattens_nested_arrays_by_reference() {
+        let nested = serde_json::json!({
+            "parameters": [
+                {"name": "m", "type": {"kind": "array", "length": 2, "type": {"kind": "array", "length": 3, "type": {"kind": "field"}}}, "visibility": "private"}
+            ],
+            "return_type": null
+        });
+        let code = generate_types(&[CircuitAbi {
+            label: "nested".into(),
+            abi: nested,
+        }]);
+        assert!(code.contains("for e0 in w.m.iter() {"));
+        assert!(code.contains("for e1 in e0.iter() {"), "{code}");
+        assert!(code.contains("v.push(*e1);"));
+        assert!(!code.contains("in *e"));
     }
 
     #[test]
