@@ -80,6 +80,18 @@ const KERNEL_PARAMS: [&str; 7] = [
 ];
 
 /// The proof system a circuit's ABI calls for (see the module docs).
+/// Whether two ABIs (nargo's `abi` JSON) are the same, compared as JSON: nargo doesn't keep the
+/// order of `error_types` from one compilation to the next, so equal ABIs can differ as text.
+fn same_abi(a: &str, b: &str) -> bool {
+    match (
+        serde_json::from_str::<serde_json::Value>(a),
+        serde_json::from_str::<serde_json::Value>(b),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
 fn system_of(label: &str, abi: &serde_json::Value, oracle: Oracle) -> ProofSystem {
     let params = abi["parameters"].as_array().cloned().unwrap_or_default();
     let ret = abi["return_type"]["visibility"].as_str();
@@ -531,7 +543,7 @@ fn freeze(o: &Opts) {
             Some((i, v, _)) => {
                 let old_abi =
                     std::fs::read_to_string(dir_of(v).join("abi.json")).unwrap_or_default();
-                let abi_changed = old_abi != c.abi;
+                let abi_changed = !same_abi(&old_abi, &c.abi);
                 if abi_changed && !abi_change {
                     fail(format!(
                         "{}: the ABI changed; rerun with --abi-change",
@@ -762,4 +774,21 @@ fn derive_vk(c: &Compiled) -> Vec<u8> {
     }
     .unwrap_or_else(|e| fail(e))
     .0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An ABI whose `error_types` came out in another order is the same ABI; another parameter isn't.
+    #[test]
+    fn abis_compare_as_json() {
+        let a = r#"{"parameters":[{"name":"x"}],"error_types":{"1":{"k":"a"},"2":{"k":"b"}}}"#;
+        let b = "{\n  \"error_types\": {\"2\": {\"k\": \"b\"}, \"1\": {\"k\": \"a\"}},\n  \"parameters\": [{\"name\": \"x\"}]\n}";
+        assert!(same_abi(a, b));
+        assert!(!same_abi(
+            a,
+            r#"{"parameters":[{"name":"y"}],"error_types":{}}"#
+        ));
+    }
 }
