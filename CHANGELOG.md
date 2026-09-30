@@ -2,6 +2,19 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.3.3 - 2026-09-30
+#### Performance
+- (**kernels**) take the key hash as a witness, hash each Merkle level once (-14% kernel_step) - (4ccd6f6) - Anton Velichko
+#### Tests
+- (**kernels**) a key folded under another registered key's hash is refused - (267b98d) - Anton Velichko
+#### Continuous Integration
+- (**release**) release a patch for perf commits - (6a9f3a5) - Anton Velichko
+- run the proving tests (NOIR_ZK_PROVE) with the SRS noir-zk pins - (3a43ae8) - Anton Velichko
+#### Miscellaneous Chores
+- add noir-lang's noir-idioms and noir-optimize-acir skills - (e9b2cac) - Anton Velichko
+
+- - -
+
 ## v0.3.2 - 2026-09-30
 #### Bug Fixes
 - (**cli**) freeze compares ABIs as JSON, not as text - (fa2b0c8) - Anton Velichko
