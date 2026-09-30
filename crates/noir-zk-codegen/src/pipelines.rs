@@ -3,14 +3,16 @@
 //! typed code with roots computed here (the same Poseidon2 as the runtime).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write as _;
 use std::path::Path;
 
 use noir_zk_core::codec::{field_from_be_bytes, field_to_be_bytes32};
 use noir_zk_core::tree::{self, Tree, DEPLOYMENT_HEIGHT, PIPELINE_HEIGHT};
 use noir_zk_core::{Field, Layout};
+use proc_macro2::TokenStream;
+use quote::quote;
 
-use crate::{camel, hex32};
+use crate::camel;
+use crate::tokens::{bytes32, doc, ident, usize_lit};
 
 /// One active circuit of this registry, as the families see it.
 pub(crate) struct Active {
@@ -404,154 +406,349 @@ pub(crate) fn pipelines(manifest: &toml::Value, families: &[Family]) -> Vec<Pipe
 /// Link types defined by `noir_zk_core::pipeline::links` (shared across libraries).
 const SHARED_LINKS: [&str; 1] = ["PayloadCommitment"];
 
-fn hexf(f: &Field) -> String {
-    hex32(&hex::encode(field_to_be_bytes32(f)))
+/// A field element as its 32-byte big-endian array.
+fn field(f: &Field) -> TokenStream {
+    bytes32(&hex::encode(field_to_be_bytes32(f)))
 }
 
-fn ident(slot: &str) -> String {
+/// A slot name as a Rust field name.
+fn slot_ident(slot: &str) -> proc_macro2::Ident {
     let s: String = slot
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect();
-    if s.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+    ident(&if s.chars().next().is_some_and(|c| c.is_ascii_digit()) {
         format!("s_{s}")
     } else {
         s
+    })
+}
+
+fn family_ref(f: &Family) -> TokenStream {
+    let (library, layer, name) = (&f.library, &f.layer, &f.name);
+    quote!(noir_zk_core::FamilyRef { library: #library, layer: #layer, family: #name })
+}
+
+fn option(o: Option<usize>) -> TokenStream {
+    o.map_or_else(
+        || quote!(None),
+        |i| {
+            let i = usize_lit(i);
+            quote!(Some(#i))
+        },
+    )
+}
+
+/// A family as its `FamilyEntry`.
+fn family_entry(f: &Family) -> TokenStream {
+    let id = family_ref(f);
+    let version = &f.version;
+    let members = f.members.iter().map(|(l, h)| {
+        let h = bytes32(h);
+        quote!((#l, #h))
+    });
+    let spec = |l: &Option<(usize, String)>| {
+        l.as_ref().map_or_else(
+            || quote!(None),
+            |(i, n)| {
+                let i = usize_lit(*i);
+                quote!(Some(noir_zk_core::LinkSpec { index: #i, link: #n }))
+            },
+        )
+    };
+    let (link_in, link_out) = (spec(&f.link_in), spec(&f.link_out));
+    let binds = f.binds.iter().map(|(s, i)| {
+        let i = usize_lit(*i);
+        quote!(noir_zk_core::BindSpec { slot: #s, index: #i })
+    });
+    let consts = f.consts.iter().map(|(i, v)| {
+        let (i, v) = (usize_lit(*i), field(v));
+        quote!(noir_zk_core::ConstSpec { index: #i, value: #v })
+    });
+    let (record_fields, public_from) = (usize_lit(f.record_fields), usize_lit(f.public_from));
+    let slots = &f.slots;
+    let root = field(&f.root);
+    quote! {
+        noir_zk_core::FamilyEntry {
+            id: #id,
+            version: #version,
+            members: &[#(#members),*],
+            record_fields: #record_fields,
+            link_in: #link_in,
+            link_out: #link_out,
+            binds: &[#(#binds),*],
+            consts: &[#(#consts),*],
+            public_from: #public_from,
+            slots: &[#(#slots),*],
+            root: #root,
+        }
+    }
+}
+
+/// A pipeline position as its `PositionEntry`.
+fn position_entry(f: &Family, l: &Layout) -> TokenStream {
+    let family = family_ref(f);
+    let (link_in, link_out) = (option(l.link_in), option(l.link_out));
+    let binds = l.binds.iter().map(|(s, r)| {
+        let (s, r) = (usize_lit(*s), usize_lit(*r));
+        quote!((#s, #r))
+    });
+    let consts = l.consts.iter().map(|(i, v)| {
+        let (i, v) = (usize_lit(*i), field(v));
+        quote!((#i, noir_zk_core::codec::field_from_be_bytes(&#v)))
+    });
+    let (pub_from, n_pub) = (usize_lit(l.pub_from), usize_lit(l.n_pub));
+    // Inside `vec![…]`, which is printed as written: no trailing commas.
+    quote! {
+        noir_zk_core::PositionEntry {
+            family: #family,
+            layout: noir_zk_core::Layout {
+                link_in: #link_in,
+                link_out: #link_out,
+                binds: vec![#(#binds),*],
+                pub_from: #pub_from,
+                n_pub: #n_pub,
+                consts: vec![#(#consts),*]
+            }
+        }
+    }
+}
+
+/// `pipelines::<name>`: the root, the entry, the typed outputs, `fold` and `verify`.
+fn pipeline_module(index: usize, p: &Pipeline, families: &[Family]) -> TokenStream {
+    let text = format!(
+        "Pipeline `{}`: {}.",
+        p.name,
+        p.positions
+            .iter()
+            .map(|(fi, _)| families[*fi].id())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    let module_doc = doc(&text);
+    let module = ident(&p.name);
+    let name = &p.name;
+    let root = field(&p.root);
+    let index = usize_lit(index);
+    let positions = p
+        .positions
+        .iter()
+        .map(|(fi, l)| position_entry(&families[*fi], l));
+    let slots = &p.slots;
+    let slot_fields = p.slots.iter().map(|s| {
+        let (d, n) = (doc(&format!("Slot `{s}`.")), slot_ident(s));
+        quote! {
+            #d
+            pub #n: noir_zk_core::Field,
+        }
+    });
+    let slot_reads = p.slots.iter().enumerate().map(|(i, s)| {
+        let (n, at) = (slot_ident(s), usize_lit(3 + i));
+        quote!(#n: f[#at],)
+    });
+    quote! {
+        #module_doc
+        pub mod #module {
+            #[doc = " The pipeline root (big-endian)."]
+            pub const ROOT: [u8; 32] = #root;
+            #[doc = " Its index in the deployment tree."]
+            pub const INDEX: usize = #index;
+            #[doc = " The pipeline as the builder folds it."]
+            pub static PIPELINE: std::sync::LazyLock<noir_zk_core::PipelineEntry> = std::sync::LazyLock::new(|| noir_zk_core::PipelineEntry {
+                name: #name,
+                index: #index,
+                positions: vec![#(#positions),*],
+                slots: vec![#(#slots),*],
+                root: ROOT,
+            });
+
+            #[doc = " The proof's public outputs: the deployment and pipeline roots, the length, then the slots by name."]
+            #[derive(Clone, Debug, PartialEq, Eq)]
+            pub struct Outputs {
+                #[doc = " The deployment root the verifier pins."]
+                pub deployment_root: noir_zk_core::Field,
+                #[doc = " This pipeline's root."]
+                pub pipeline_root: noir_zk_core::Field,
+                #[doc = " The number of positions folded."]
+                pub length: u64,
+                #(#slot_fields)*
+            }
+
+            impl Outputs {
+                #[doc = " From the hiding kernel's public fields."]
+                pub fn from_fields(f: &[noir_zk_core::Field]) -> Self {
+                    Self {
+                        deployment_root: f[0],
+                        pipeline_root: f[1],
+                        length: noir_zk_core::codec::field_to_u64(&f[2]).unwrap_or(u64::MAX),
+                        #(#slot_reads)*
+                    }
+                }
+            }
+
+            #[doc = " Starts folding this pipeline over `artifacts` (the merged pool of every registry it draws from, plus the kernels)."]
+            pub fn fold<'a>(artifacts: &'a dyn noir_zk_core::Artifacts) -> Result<noir_zk_backend::pipeline::PipelineFold<'a, noir_zk_core::NoLink>, noir_zk_core::Error> {
+                noir_zk_backend::pipeline::PipelineFold::new(artifacts, &PIPELINE)
+            }
+
+            #[doc = " Verifies `proof` (hiding key, deployment root, pipeline root, length) and returns its outputs."]
+            pub fn verify(proof: &noir_zk_backend::chonk::FoldedProof) -> Result<Outputs, noir_zk_core::Error> {
+                let f = noir_zk_backend::pipeline::verify(proof, &PIPELINE, super::super::DEPLOYMENT.root_field(), noir_zk_backend::pipeline::hiding_vk())?;
+                Ok(Outputs::from_fields(&f))
+            }
+        }
     }
 }
 
 /// The generated code: `WRAPPED`, `layer_of`, `links`, `FAMILIES`,
 /// `families`, `pipelines`, `DEPLOYMENT` and the roots test.
-pub(crate) fn emit(families: &[Family], pipelines: &[Pipeline]) -> String {
-    let mut code = String::new();
+pub(crate) fn emit(families: &[Family], pipelines: &[Pipeline]) -> TokenStream {
     if families.is_empty() {
-        return code;
+        return TokenStream::new();
     }
     // Wrapped members as registry entries (their bytecode, ABI and key come
     // from the wrapped registry's own artifacts at run time).
-    code.push_str("/// Circuits of wrapped registries (other libraries' families): identity only.\npub const WRAPPED: &[noir_zk_core::RegistryEntry] = &[\n");
-    for f in families.iter().filter(|f| f.wrapped) {
-        for (label, h) in &f.members {
-            writeln!(code, "    noir_zk_core::RegistryEntry {{ label: {label:?}, version: {:?}, system: noir_zk_core::ProofSystem::Chonk(noir_zk_core::ChonkRole::App), status: noir_zk_core::Status::Active, bytecode_sha256: [0; 32], vk_sha256: [0; 32], vk_hash: {}, layer: {:?}, family: {:?}, abi: None, vk: &[], vk_index: None, vk_siblings: &[] }},", f.version, hex32(h), f.layer, f.name).ok();
-        }
-    }
-    code.push_str("];\n\n/// The layer of a circuit of this registry or a wrapped one.\npub fn layer_of(label: &str) -> Option<&'static str> {\n    match label {\n");
-    let mut seen = BTreeSet::new();
-    for f in families {
-        for (label, _) in &f.members {
-            if seen.insert(label.clone()) {
-                writeln!(code, "        {label:?} => Some({:?}),", f.layer).ok();
+    let wrapped = families.iter().filter(|f| f.wrapped).flat_map(|f| {
+        f.members.iter().map(move |(label, h)| {
+            let (version, layer, name, h) = (&f.version, &f.layer, &f.name, bytes32(h));
+            quote! {
+                noir_zk_core::RegistryEntry { label: #label, version: #version, system: noir_zk_core::ProofSystem::Chonk(noir_zk_core::ChonkRole::App), status: noir_zk_core::Status::Active, bytecode_sha256: [0; 32], vk_sha256: [0; 32], vk_hash: #h, layer: #layer, family: #name, abi: None, vk: &[], vk_index: None, vk_siblings: &[] }
             }
-        }
-    }
-    code.push_str("        _ => None,\n    }\n}\n\n");
+        })
+    });
+    let mut seen = BTreeSet::new();
+    let layers: Vec<TokenStream> = families
+        .iter()
+        .flat_map(|f| f.members.iter().map(move |(label, _)| (label, &f.layer)))
+        .filter(|(label, _)| seen.insert((*label).clone()))
+        .map(|(label, layer)| quote!(#label => Some(#layer),))
+        .collect();
     // Links.
     let links: BTreeSet<&str> = families
         .iter()
         .flat_map(|f| [&f.link_in, &f.link_out])
         .filter_map(|l| l.as_ref().map(|(_, n)| n.as_str()))
         .collect();
-    code.push_str("/// The link types the families declare (noir-zk's shared vocabulary re-exported, the rest generated).\npub mod links {\n    pub use noir_zk_core::NoLink;\n");
     let (shared, own): (Vec<&str>, Vec<&str>) = links
         .iter()
         .copied()
         .partition(|l| SHARED_LINKS.contains(l));
-    for l in shared {
-        writeln!(code, "    pub use noir_zk_core::pipeline::links::{l};").ok();
-    }
-    if !own.is_empty() {
-        writeln!(code, "    noir_zk_core::links!({});", own.join(", ")).ok();
-    }
-    code.push_str("}\n\n");
-    // FAMILIES.
-    code.push_str("/// Every family this registry declares (its own and wrapped ones).\npub static FAMILIES: &[noir_zk_core::FamilyEntry] = &[\n");
-    for f in families {
-        let members: Vec<String> = f
-            .members
-            .iter()
-            .map(|(l, h)| format!("({l:?}, {})", hex32(h)))
-            .collect();
-        let spec = |l: &Option<(usize, String)>| {
-            l.as_ref().map_or("None".to_string(), |(i, n)| {
-                format!("Some(noir_zk_core::LinkSpec {{ index: {i}, link: {n:?} }})")
-            })
-        };
-        let binds: Vec<String> = f
-            .binds
-            .iter()
-            .map(|(s, i)| format!("noir_zk_core::BindSpec {{ slot: {s:?}, index: {i} }}"))
-            .collect();
-        let slots: Vec<String> = f.slots.iter().map(|s| format!("{s:?}")).collect();
-        let consts: Vec<String> = f
-            .consts
-            .iter()
-            .map(|(i, v)| {
-                format!(
-                    "noir_zk_core::ConstSpec {{ index: {i}, value: {} }}",
-                    hexf(v)
-                )
-            })
-            .collect();
-        writeln!(code, "    noir_zk_core::FamilyEntry {{\n        id: noir_zk_core::FamilyRef {{ library: {:?}, layer: {:?}, family: {:?} }},\n        version: {:?},\n        members: &[{}],\n        record_fields: {},\n        link_in: {},\n        link_out: {},\n        binds: &[{}],\n        consts: &[{}],\n        public_from: {},\n        slots: &[{}],\n        root: {},\n    }},", f.library, f.layer, f.name, f.version, members.join(", "), f.record_fields, spec(&f.link_in), spec(&f.link_out), binds.join(", "), consts.join(", "), f.public_from, slots.join(", "), hexf(&f.root)).ok();
-    }
-    code.push_str("];\n\n");
+    let shared = shared.iter().map(|l| ident(l));
+    let own_links = (!own.is_empty()).then(|| {
+        let own = own.iter().map(|l| ident(l));
+        quote!(noir_zk_core::links!(#(#own),*);)
+    });
+    let entries = families.iter().map(family_entry);
     // Family marker types.
-    code.push_str("/// One marker type per family: what the pipeline builder folds at a position.\npub mod families {\n");
-    for (i, f) in families.iter().enumerate() {
-        let l = |l: &Option<(usize, String)>| {
-            l.as_ref()
-                .map_or("super::links::NoLink".to_string(), |(_, n)| {
-                    format!("super::links::{n}")
-                })
+    let markers = families.iter().enumerate().map(|(i, f)| {
+        let d = doc(&format!(
+            "Family `{}` ({} circuits, record `[Fr; {}]`).",
+            f.id(),
+            f.members.len(),
+            f.record_fields
+        ));
+        let ty = ident(&f.type_name());
+        let n = usize_lit(f.record_fields);
+        let link = |l: &Option<(usize, String)>| {
+            let l = ident(l.as_ref().map_or("NoLink", |(_, n)| n.as_str()));
+            quote!(super::links::#l)
         };
-        writeln!(code, "    /// Family `{}` ({} circuits, record `[Fr; {}]`).\n    pub struct {};\n    impl noir_zk_core::StepFamily for {} {{\n        type Record = [noir_zk_core::Field; {}];\n        type LinkIn = {};\n        type LinkOut = {};\n        fn family() -> &'static noir_zk_core::FamilyEntry {{\n            &super::FAMILIES[{i}]\n        }}\n    }}", f.id(), f.members.len(), f.record_fields, f.type_name(), f.type_name(), f.record_fields, l(&f.link_in), l(&f.link_out)).ok();
-    }
-    code.push_str("}\n\n");
+        let (link_in, link_out) = (link(&f.link_in), link(&f.link_out));
+        let i = usize_lit(i);
+        quote! {
+            #d
+            pub struct #ty;
+            impl noir_zk_core::StepFamily for #ty {
+                type Record = [noir_zk_core::Field; #n];
+                type LinkIn = #link_in;
+                type LinkOut = #link_out;
+                fn family() -> &'static noir_zk_core::FamilyEntry {
+                    &super::FAMILIES[#i]
+                }
+            }
+        }
+    });
+    let mut code = quote! {
+        #[doc = " Circuits of wrapped registries (other libraries' families): identity only."]
+        pub const WRAPPED: &[noir_zk_core::RegistryEntry] = &[#(#wrapped),*];
+
+        #[doc = " The layer of a circuit of this registry or a wrapped one."]
+        pub fn layer_of(label: &str) -> Option<&'static str> {
+            match label {
+                #(#layers)*
+                _ => None,
+            }
+        }
+
+        #[doc = " The link types the families declare (noir-zk's shared vocabulary re-exported, the rest generated)."]
+        pub mod links {
+            pub use noir_zk_core::NoLink;
+            #(pub use noir_zk_core::pipeline::links::#shared;)*
+            #own_links
+        }
+
+        #[doc = " Every family this registry declares (its own and wrapped ones)."]
+        pub static FAMILIES: &[noir_zk_core::FamilyEntry] = &[#(#entries),*];
+
+        #[doc = " One marker type per family: what the pipeline builder folds at a position."]
+        pub mod families {
+            #(#markers)*
+        }
+    };
     if pipelines.is_empty() {
         return code;
     }
     // Pipelines.
     let roots: Vec<Field> = pipelines.iter().map(|p| p.root).collect();
-    let deployment = Tree::build(&roots, DEPLOYMENT_HEIGHT).root;
-    code.push_str("/// The pipelines this registry declares: each with its root, its typed outputs, `fold` and `verify`.\npub mod pipelines {\n");
-    for (index, p) in pipelines.iter().enumerate() {
-        let positions: Vec<String> = p
-            .positions
-            .iter()
-            .map(|(fi, l)| {
-                let f = &families[*fi];
-                let opt = |o: Option<usize>| o.map_or("None".to_string(), |i| format!("Some({i})"));
-                format!("noir_zk_core::PositionEntry {{ family: noir_zk_core::FamilyRef {{ library: {:?}, layer: {:?}, family: {:?} }}, layout: noir_zk_core::Layout {{ link_in: {}, link_out: {}, binds: vec![{}], pub_from: {}, n_pub: {}, consts: vec![{}] }} }}", f.library, f.layer, f.name, opt(l.link_in), opt(l.link_out), l.binds.iter().map(|(s, r)| format!("({s}, {r})")).collect::<Vec<_>>().join(", "), l.pub_from, l.n_pub, l.consts.iter().map(|(i, v)| format!("({i}, noir_zk_core::codec::field_from_be_bytes(&{}))", hexf(v))).collect::<Vec<_>>().join(", "))
-            })
-            .collect();
-        let slot_fields: String = p
-            .slots
-            .iter()
-            .map(|s| {
-                format!(
-                    "        /// Slot `{s}`.\n        pub {}: noir_zk_core::Field,\n",
-                    ident(s)
-                )
-            })
-            .collect();
-        let slot_reads: String = p
-            .slots
-            .iter()
-            .enumerate()
-            .map(|(i, s)| format!("            {}: f[{}],\n", ident(s), 3 + i))
-            .collect();
-        writeln!(code, "    /// Pipeline `{name}`: {}.\n    pub mod {name} {{\n        /// The pipeline root (big-endian).\n        pub const ROOT: [u8; 32] = {root};\n        /// Its index in the deployment tree.\n        pub const INDEX: usize = {index};\n        /// The pipeline as the builder folds it.\n        pub static PIPELINE: std::sync::LazyLock<noir_zk_core::PipelineEntry> = std::sync::LazyLock::new(|| noir_zk_core::PipelineEntry {{\n            name: {name:?},\n            index: {index},\n            positions: vec![{positions}],\n            slots: vec![{slots}],\n            root: ROOT,\n        }});\n\n        /// The proof's public outputs: the deployment and pipeline roots, the length, then the slots by name.\n        #[derive(Clone, Debug, PartialEq, Eq)]\n        pub struct Outputs {{\n            /// The deployment root the verifier pins.\n            pub deployment_root: noir_zk_core::Field,\n            /// This pipeline's root.\n            pub pipeline_root: noir_zk_core::Field,\n            /// The number of positions folded.\n            pub length: u64,\n{slot_fields}        }}\n\n        impl Outputs {{\n            /// From the hiding kernel's public fields.\n            pub fn from_fields(f: &[noir_zk_core::Field]) -> Self {{\n                Self {{\n                    deployment_root: f[0],\n                    pipeline_root: f[1],\n                    length: noir_zk_core::codec::field_to_u64(&f[2]).unwrap_or(u64::MAX),\n{slot_reads}                }}\n            }}\n        }}\n\n        /// Starts folding this pipeline over `artifacts` (the merged pool of every registry it draws from, plus the kernels).\n        pub fn fold<'a>(artifacts: &'a dyn noir_zk_core::Artifacts) -> Result<noir_zk_backend::pipeline::PipelineFold<'a, noir_zk_core::NoLink>, noir_zk_core::Error> {{\n            noir_zk_backend::pipeline::PipelineFold::new(artifacts, &PIPELINE)\n        }}\n\n        /// Verifies `proof` (hiding key, deployment root, pipeline root, length) and returns its outputs.\n        pub fn verify(proof: &noir_zk_backend::chonk::FoldedProof) -> Result<Outputs, noir_zk_core::Error> {{\n            let f = noir_zk_backend::pipeline::verify(proof, &PIPELINE, super::super::DEPLOYMENT.root_field(), noir_zk_backend::pipeline::hiding_vk())?;\n            Ok(Outputs::from_fields(&f))\n        }}\n    }}",
-            p.positions.iter().map(|(fi, _)| families[*fi].id()).collect::<Vec<_>>().join(", "),
-            name = p.name, root = hexf(&p.root), positions = positions.join(", "), slots = p.slots.iter().map(|s| format!("{s:?}")).collect::<Vec<_>>().join(", ")).ok();
-    }
-    code.push_str("}\n\n");
-    writeln!(code, "/// The deployment root: the tree over the pipelines' roots, in declaration order. Verifiers pin it.\npub const DEPLOYMENT_ROOT: [u8; 32] = {};\n/// The deployment: the pipeline roots and their tree.\npub static DEPLOYMENT: noir_zk_core::DeploymentEntry = noir_zk_core::DeploymentEntry {{\n    roots: &[{}],\n    root: DEPLOYMENT_ROOT,\n}};\n", hexf(&deployment), roots.iter().map(hexf).collect::<Vec<_>>().join(", ")).ok();
+    let deployment = field(&Tree::build(&roots, DEPLOYMENT_HEIGHT).root);
+    let modules = pipelines
+        .iter()
+        .enumerate()
+        .map(|(i, p)| pipeline_module(i, p, families));
+    let root_values = roots.iter().map(field);
     // The roots test.
-    code.push_str("#[cfg(test)]\nmod generated_roots {\n    /// Every family, pipeline and deployment root recomputed at run time equals its constant.\n    #[test]\n    fn roots_match_the_constants() {\n        use noir_zk_core::tree;\n        for f in super::FAMILIES {\n            let hashes: Vec<noir_zk_core::Field> = f.members.iter().map(|(_, h)| noir_zk_core::codec::field_from_be_bytes(h)).collect();\n            assert_eq!(tree::family_root(tree::family_id(f.id.library, f.version, f.id.layer, f.id.family), &hashes), f.root_field(), \"family {}\", f.id);\n        }\n        let kernels = noir_zk_backend::kernels::FAMILY.root_field();\n        let mut roots = vec![];\n");
-    for p in pipelines {
-        writeln!(code, "        {{\n            let p = &*super::pipelines::{}::PIPELINE;\n            let leaves = noir_zk_core::PipelineEntry::leaves(&|id| super::FAMILIES.iter().find(|f| f.id == *id).map(|f| f.root_field()), &p.positions, kernels).unwrap();\n            assert_eq!(tree::Tree::build(&leaves, tree::PIPELINE_HEIGHT).root, p.root_field(), \"pipeline {}\");\n            roots.push(p.root_field());\n        }}", p.name, p.name).ok();
-    }
-    code.push_str("        assert_eq!(tree::Tree::build(&roots, tree::DEPLOYMENT_HEIGHT).root, super::DEPLOYMENT.root_field(), \"deployment\");\n    }\n}\n");
+    let checks = pipelines.iter().map(|p| {
+        let (m, name) = (ident(&p.name), format!("pipeline {}", p.name));
+        quote! {
+            {
+                let p = &*super::pipelines::#m::PIPELINE;
+                let leaves = noir_zk_core::PipelineEntry::leaves(&|id| super::FAMILIES.iter().find(|f| f.id == *id).map(|f| f.root_field()), &p.positions, kernels).unwrap();
+                assert_eq!(tree::Tree::build(&leaves, tree::PIPELINE_HEIGHT).root, p.root_field(), #name);
+                roots.push(p.root_field());
+            }
+        }
+    });
+    code.extend(quote! {
+        #[doc = " The pipelines this registry declares: each with its root, its typed outputs, `fold` and `verify`."]
+        pub mod pipelines {
+            #(#modules)*
+        }
+
+        #[doc = " The deployment root: the tree over the pipelines' roots, in declaration order. Verifiers pin it."]
+        pub const DEPLOYMENT_ROOT: [u8; 32] = #deployment;
+        #[doc = " The deployment: the pipeline roots and their tree."]
+        pub static DEPLOYMENT: noir_zk_core::DeploymentEntry = noir_zk_core::DeploymentEntry {
+            roots: &[#(#root_values),*],
+            root: DEPLOYMENT_ROOT,
+        };
+
+        #[cfg(test)]
+        mod generated_roots {
+            #[doc = " Every family, pipeline and deployment root recomputed at run time equals its constant."]
+            #[test]
+            fn roots_match_the_constants() {
+                use noir_zk_core::tree;
+                for f in super::FAMILIES {
+                    let hashes: Vec<noir_zk_core::Field> = f.members.iter().map(|(_, h)| noir_zk_core::codec::field_from_be_bytes(h)).collect();
+                    assert_eq!(tree::family_root(tree::family_id(f.id.library, f.version, f.id.layer, f.id.family), &hashes), f.root_field(), "family {}", f.id);
+                }
+                let kernels = noir_zk_backend::kernels::FAMILY.root_field();
+                let mut roots = vec![];
+                #(#checks)*
+                assert_eq!(tree::Tree::build(&roots, tree::DEPLOYMENT_HEIGHT).root, super::DEPLOYMENT.root_field(), "deployment");
+            }
+        }
+    });
     code
 }
 
