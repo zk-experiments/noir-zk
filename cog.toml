@@ -16,6 +16,11 @@ post_bump_hooks = [
     "git push origin v{{version}}",
 ]
 
+# A kernel made cheaper (`perf:`) is refrozen under new versions and keys and changes every
+# pipeline root built on it, so it releases a patch.
+[commit_types]
+perf = { changelog_title = "Performance", bump_patch = true }
+
 [changelog]
 path = "CHANGELOG.md"
 authors = []
