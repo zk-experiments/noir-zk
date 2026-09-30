@@ -2,6 +2,15 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.3.1 - 2026-09-30
+#### Bug Fixes
+- (**codegen**) struct names that clash with generated ones or with each other - (0635072) - Anton Velichko
+- (**codegen**) raw identifiers for names that are Rust keywords - (853ecc1) - Anton Velichko
+#### Refactoring
+- (**codegen**) build the generated code with quote! and print it with prettyplease - (b04daa7) - Anton Velichko
+
+- - -
+
 ## v0.3.0 - 2026-09-29
 #### Features
 - (**backend**) pipeline folding, bundled and per-layer stores, packs from a catalog - (74c702b) - Anton Velichko
