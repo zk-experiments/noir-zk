@@ -73,6 +73,12 @@
             }
           },
           {
+            "name": "key_hash",
+            "type": {
+              "kind": "field"
+            }
+          },
+          {
             "name": "family",
             "type": {
               "fields": [

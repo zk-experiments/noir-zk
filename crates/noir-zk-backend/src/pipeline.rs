@@ -211,7 +211,8 @@ impl<'a, L: Link> PipelineFold<'a, L> {
         )
     }
 
-    /// `Vk { key, family, family_id, pipeline }` of `label` in `family` at pipeline leaf `leaf`.
+    /// `Vk { key, key_hash, family, family_id, pipeline }` of `label` in `family` at pipeline leaf
+    /// `leaf` (`key_hash` is `tree::hash(key)`, which bb constrains against the key).
     fn vk_fields(
         &self,
         family: &FamilyTree,
@@ -221,6 +222,7 @@ impl<'a, L: Link> PipelineFold<'a, L> {
     ) -> Result<Vec<Field>, Error> {
         let vk = self.artifacts.vk(label)?;
         let mut v = chonk::vk_fields(&vk, kind)?;
+        v.push(tree::hash(&v));
         path_fields(family.path(label)?, &mut v);
         let e = family.entry;
         v.push(tree::family_id(

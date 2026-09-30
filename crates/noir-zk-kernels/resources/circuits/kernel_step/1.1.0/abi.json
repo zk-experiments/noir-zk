@@ -13,6 +13,10 @@
       "error_kind": "string",
       "string": "Field failed to decompose into specified 4 limbs"
     },
+    "12469291177396340830": {
+      "error_kind": "string",
+      "string": "call to assert_max_bit_size"
+    },
     "12565047675933492365": {
       "error_kind": "string",
       "string": "app output differs from the public slot it is bound to"
@@ -81,6 +85,12 @@
               "type": {
                 "kind": "field"
               }
+            }
+          },
+          {
+            "name": "key_hash",
+            "type": {
+              "kind": "field"
             }
           },
           {
@@ -157,6 +167,12 @@
               "type": {
                 "kind": "field"
               }
+            }
+          },
+          {
+            "name": "key_hash",
+            "type": {
+              "kind": "field"
             }
           },
           {
