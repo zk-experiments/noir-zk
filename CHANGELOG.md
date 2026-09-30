@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.3.2 - 2026-09-30
+#### Bug Fixes
+- (**cli**) freeze compares ABIs as JSON, not as text - (fa2b0c8) - Anton Velichko
+
+- - -
+
 ## v0.3.1 - 2026-09-30
 #### Bug Fixes
 - (**codegen**) struct names that clash with generated ones or with each other - (0635072) - Anton Velichko
