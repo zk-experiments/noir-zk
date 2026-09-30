@@ -72,11 +72,13 @@ pub fn merkle_root<let N: u32>(leaf: Field, path: MerklePath<N>) -> Field {
     let bits: [bool; N] = path.index.to_le_bits();
     let mut node = leaf;
     for l in 0..N {
-        node = if bits[l] {
-            hash([path.siblings[l], node])
+        // Order the pair, then hash once (hashing inside each branch costs two).
+        let (left, right) = if bits[l] {
+            (path.siblings[l], node)
         } else {
-            hash([node, path.siblings[l]])
+            (node, path.siblings[l])
         };
+        node = hash([left, right]);
     }
     node
 }
@@ -86,6 +88,9 @@ pub fn merkle_root<let N: u32>(leaf: Field, path: MerklePath<N>) -> Field {
 /// is the family root) and, with that root, in the pipeline tree.
 pub struct Vk {
     pub key: [Field; VK_FIELDS],
+    /// `H(key)`, the Poseidon2 hash of the key's fields (`noir_zk_core::tree::hash`), supplied by
+    /// the prover rather than recomputed: Barretenberg constrains it (see `check_vk`).
+    pub key_hash: Field,
     pub family: MerklePath<FAMILY_HEIGHT>,
     pub family_id: Field,
     pub pipeline: MerklePath<PIPELINE_HEIGHT>,
@@ -136,8 +141,19 @@ impl Layout {
 /// identity and that tree) is in the pipeline tree with root `root` at
 /// `position` with `layout_hash`; returns the key's hash (bb checks the
 /// folded proof against it).
+///
+/// The key's hash is `vk.key_hash`, not recomputed here: `std::verify_proof_with_type(key, _, _,
+/// key_hash, _)` makes Barretenberg hash `key` in-circuit and constrain the result equal to
+/// `key_hash`, so a key that isn't the one hashed can't be folded. In bb 7.0.0-nightly.20260927
+/// (aztec-packages 5cb127606d5921cf7995287f7985e00f2c534d54, barretenberg/cpp/src/barretenberg):
+/// `dsl/acir_format/recursion_constraint.cpp:195` pairs every recursion constraint's `key_hash`
+/// witness with its `key`; `chonk/chonk.cpp:293` verifies each queue entry (OINK, HN and
+/// HN_FINAL alike) through Oink; `ultra_honk/oink_verifier.cpp:49-64` hashes the key (the same
+/// Poseidon2, rate 3, over the same 151 fields) and asserts `vk_and_hash->hash.assert_equal(vk_hash)`.
+/// A bb upgrade must keep that check: `examples/pipelines/combined/tests/key_hash.rs` folds a
+/// key under another registered key's hash and expects proving to fail.
 pub fn check_vk(root: Field, position: Field, layout_hash: Field, vk: Vk) -> Field {
-    let vk_hash = hash(vk.key);
+    let vk_hash = vk.key_hash;
     let family_root = hash(
         [DOMAIN_FAMILY, vk.family_id, merkle_root(vk_hash, vk.family)],
     );
@@ -181,6 +197,9 @@ pub fn apply(prev: [Field; STATE_FIELDS], step: [Field; R], l: Layout) -> [Field
             );
         }
     }
+    // The write pointer is a small count (≤ P), so a 32-bit range check makes the cast exact; a bare
+    // Field-to-u32 cast would range check 222 bits and compare against the modulus.
+    prev[S_WRITE_PTR].assert_max_bit_size::<32>();
     let w = prev[S_WRITE_PTR] as u32;
     assert(l.pub_from + l.n_pub <= R, "public outputs beyond the record");
     assert(w + l.n_pub <= P, "no room left in the public slots");

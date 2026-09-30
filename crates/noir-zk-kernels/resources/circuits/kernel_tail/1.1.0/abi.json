@@ -41,6 +41,12 @@
             }
           },
           {
+            "name": "key_hash",
+            "type": {
+              "kind": "field"
+            }
+          },
+          {
             "name": "family",
             "type": {
               "fields": [
@@ -101,69 +107,16 @@
         "path": "pipeline_kernel::Vk"
       },
       "visibility": "private"
-    },
-    {
-      "name": "deployment",
-      "type": {
-        "fields": [
-          {
-            "name": "index",
-            "type": {
-              "kind": "field"
-            }
-          },
-          {
-            "name": "siblings",
-            "type": {
-              "kind": "array",
-              "length": 4,
-              "type": {
-                "kind": "field"
-              }
-            }
-          }
-        ],
-        "kind": "struct",
-        "path": "pipeline_kernel::MerklePath"
-      },
-      "visibility": "private"
     }
   ],
   "return_type": {
     "abi_type": {
-      "fields": [
-        {
-          "name": "deployment_root",
-          "type": {
-            "kind": "field"
-          }
-        },
-        {
-          "name": "pipeline_root",
-          "type": {
-            "kind": "field"
-          }
-        },
-        {
-          "name": "length",
-          "type": {
-            "kind": "field"
-          }
-        },
-        {
-          "name": "slots",
-          "type": {
-            "kind": "array",
-            "length": 32,
-            "type": {
-              "kind": "field"
-            }
-          }
-        }
-      ],
-      "kind": "struct",
-      "path": "pipeline_kernel::PublicOutputs"
+      "kind": "array",
+      "length": 36,
+      "type": {
+        "kind": "field"
+      }
     },
-    "visibility": "public"
+    "visibility": "databus"
   }
 }

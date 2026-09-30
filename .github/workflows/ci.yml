@@ -120,6 +120,22 @@ jobs:
         run: cargo test --all-features
       - name: examples (pipelines workspace)
         run: cd examples/pipelines && cargo test
+      # The proving tests: the fixtures' UltraHonk proof, the examples' pipeline folds, and the
+      # regression test that bb refuses a kernel key folded under another key's hash (the kernels
+      # rely on bb's in-circuit key-hash check). They need the SRS noir-zk pins in ~/.bb-crs.
+      - name: Cache the bb CRS
+        uses: actions/cache@v4
+        with:
+          path: ~/.bb-crs
+          key: noir-zk-srs-0f238856e557-72b8cdad9da8
+      - name: Provision the SRS noir-zk pins
+        run: scripts/srs.sh
+      - name: Proving tests
+        env:
+          NOIR_ZK_PROVE: "1"
+        run: |
+          cargo test --release --all-features
+          cd examples/pipelines && cargo test --release
 
   typos:
     name: typos
