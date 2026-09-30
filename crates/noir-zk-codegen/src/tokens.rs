@@ -4,9 +4,26 @@
 use proc_macro2::{Ident, Literal, Span, TokenStream};
 use quote::quote;
 
-/// An identifier (a circuit label, a field or type name).
+/// Rust's strict and reserved keywords in every edition (2024 adds `gen`):
+/// the generated code is compiled in the host crate's edition, whichever it is.
+const KEYWORDS: [&str; 48] = [
+    "abstract", "as", "async", "await", "become", "box", "break", "const", "continue", "do", "dyn",
+    "else", "enum", "extern", "false", "final", "fn", "for", "gen", "if", "impl", "in", "let",
+    "loop", "macro", "match", "mod", "move", "mut", "override", "priv", "pub", "ref", "return",
+    "static", "struct", "trait", "true", "try", "type", "typeof", "unsafe", "unsized", "use",
+    "virtual", "where", "while", "yield",
+];
+
+/// An identifier (a circuit label, a field or type name). A name that is a
+/// Rust keyword but a valid Noir identifier (`ref`, `move`, `static`, `gen`,
+/// …) becomes a raw identifier (`r#ref`). (`self`, `super`, `crate` and `Self`
+/// can't be raw; Noir reserves them too.)
 pub(crate) fn ident(s: &str) -> Ident {
-    Ident::new(s, Span::call_site())
+    if KEYWORDS.contains(&s) {
+        Ident::new_raw(s, Span::call_site())
+    } else {
+        Ident::new(s, Span::call_site())
+    }
 }
 
 /// `/// text`, as the attribute it stands for.
@@ -48,5 +65,8 @@ mod tests {
         let b = bytes32(&format!("0x0e{}", "00".repeat(31))).to_string();
         assert!(b.starts_with("[0x0e , 0x00"), "{b}");
         assert_eq!(doc("text").to_string(), "# [doc = \" text\"]");
+        assert_eq!(ident("index").to_string(), "index");
+        assert_eq!(ident("ref").to_string(), "r#ref");
+        assert_eq!(ident("gen").to_string(), "r#gen");
     }
 }

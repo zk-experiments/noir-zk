@@ -974,4 +974,28 @@ mod tests {
         let pos: Vec<usize> = order.iter().map(|o| code.find(o).unwrap()).collect();
         assert!(pos.windows(2).all(|w| w[0] < w[1]), "{pos:?}");
     }
+
+    /// Noir allows names that are Rust keywords; they are generated as raw
+    /// identifiers, and the output parses.
+    #[test]
+    fn rust_keywords_become_raw_identifiers() {
+        let abi = serde_json::json!({
+            "parameters": [
+                {"name": "ref", "type": {"kind": "field"}, "visibility": "private"},
+                {"name": "gen", "type": {"kind": "struct", "path": "lib::Pair", "fields": [
+                    {"name": "static", "type": {"kind": "field"}}
+                ]}, "visibility": "public"}
+            ],
+            "return_type": null
+        });
+        let code = generate_types(&[CircuitAbi {
+            label: "move".into(),
+            abi,
+        }]);
+        assert!(code.contains("pub mod r#move {"), "{code}");
+        assert!(code.contains("pub r#ref: Fr,"), "{code}");
+        assert!(code.contains("pub r#static: Fr,"), "{code}");
+        assert!(code.contains("v.push(p.r#gen.r#static);"), "{code}");
+        assert!(code.contains("pub struct Pair {"), "{code}");
+    }
 }
