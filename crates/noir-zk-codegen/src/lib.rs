@@ -53,9 +53,13 @@ fn render(header: &str, code: TokenStream) -> String {
 
 /// Rust types for one circuit's ABI: struct definitions named by their Noir
 /// path, suffixed with their array lengths when one path has several shapes.
+/// A name the module already uses (the circuit's marker, `Inputs`,
+/// `PublicInputs`, `Outputs`, `Fr`) or another path's struct took is
+/// qualified by the rest of the path (`lib::Move` → `LibMove`), then numbered.
 struct Types {
     defs: BTreeMap<String, TokenStream>,
     names: BTreeMap<String, String>,
+    reserved: Vec<String>,
 }
 
 impl Types {
@@ -91,23 +95,30 @@ impl Types {
             return n.clone();
         }
         let path = ty["path"].as_str().unwrap_or("Struct");
-        let base = camel(path.rsplit("::").next().unwrap_or(path));
         // Several shapes of one path in this circuit: suffix the array lengths.
         let shapes = all
             .iter()
             .filter(|t| t["path"] == ty["path"] && Self::signature(t) != sig)
             .count();
-        let name = if shapes == 0 {
-            base
+        let lens = if shapes == 0 {
+            String::new()
         } else {
-            let lens: Vec<String> = ty["fields"]
+            ty["fields"]
                 .as_array()
                 .into_iter()
                 .flatten()
                 .filter_map(|f| f["type"]["length"].as_u64().map(|l| l.to_string()))
-                .collect();
-            format!("{base}{}", lens.join("x"))
+                .collect::<Vec<_>>()
+                .join("x")
         };
+        let last = camel(path.rsplit("::").next().unwrap_or(path));
+        let qualified: String = path.split("::").map(camel).collect();
+        let taken = |n: &String| self.reserved.contains(n) || self.names.values().any(|m| m == n);
+        let name = [format!("{last}{lens}"), format!("{qualified}{lens}")]
+            .into_iter()
+            .chain((2..).map(|i| format!("{qualified}{lens}{i}")))
+            .find(|n| !taken(n))
+            .expect("a free name");
         self.names.insert(sig, name.clone());
         let fields: Vec<(String, TokenStream)> = ty["fields"]
             .as_array()
@@ -323,6 +334,15 @@ fn circuit_module(
     let mut types = Types {
         defs: BTreeMap::new(),
         names: BTreeMap::new(),
+        reserved: [
+            camel(label).as_str(),
+            "Inputs",
+            "PublicInputs",
+            "Outputs",
+            "Fr",
+        ]
+        .map(str::to_string)
+        .to_vec(),
     };
     // `pub` parameters go to `PublicInputs` (UltraHonk's claim), the rest to
     // `Inputs`; witness order interleaves them as the ABI declares them.
@@ -997,5 +1017,52 @@ mod tests {
         assert!(code.contains("pub r#static: Fr,"), "{code}");
         assert!(code.contains("v.push(p.r#gen.r#static);"), "{code}");
         assert!(code.contains("pub struct Pair {"), "{code}");
+    }
+
+    /// A struct named like something the module generates, or like another
+    /// path's struct, is qualified by its path; each keeps its own fields.
+    #[test]
+    fn struct_names_never_clash() {
+        let st = |path: &str, field: &str| {
+            serde_json::json!({"kind": "struct", "path": path, "fields": [
+                {"name": field, "type": {"kind": "field"}}
+            ]})
+        };
+        let abi = serde_json::json!({
+            "parameters": [
+                {"name": "a", "type": st("lib::Point", "x"), "visibility": "private"},
+                {"name": "b", "type": st("other::Point", "y"), "visibility": "private"},
+                {"name": "c", "type": st("lib::Demo", "z"), "visibility": "private"},
+                {"name": "d", "type": st("lib::Inputs", "w"), "visibility": "private"}
+            ],
+            "return_type": null
+        });
+        let code = generate_types(&[CircuitAbi {
+            label: "demo".into(),
+            abi,
+        }]);
+        for s in [
+            "Point",
+            "OtherPoint",
+            "LibDemo",
+            "LibInputs",
+            "Demo",
+            "Inputs",
+        ] {
+            assert_eq!(
+                code.matches(&format!("pub struct {s} ")).count()
+                    + code.matches(&format!("pub struct {s};")).count(),
+                1,
+                "{s}: {code}"
+            );
+        }
+        assert!(code.contains("pub a: Point,"), "{code}");
+        assert!(code.contains("pub b: OtherPoint,"), "{code}");
+        assert!(code.contains("pub c: LibDemo,"), "{code}");
+        assert!(code.contains("pub d: LibInputs,"), "{code}");
+        assert!(
+            code.contains("pub y: Fr,"),
+            "other::Point keeps its field: {code}"
+        );
     }
 }
