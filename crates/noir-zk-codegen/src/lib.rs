@@ -19,13 +19,18 @@
 #![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)] // build-time codegen: fail loudly
 
 mod pipelines;
+mod tokens;
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+
+use tokens::{bytes32, doc, ident, u64_lit};
 
 fn camel(s: &str) -> String {
     s.split('_')
@@ -38,19 +43,18 @@ fn camel(s: &str) -> String {
         .collect()
 }
 
-fn hex32(s: &str) -> String {
-    let h = s.trim_start_matches("0x");
-    assert_eq!(h.len(), 64, "expected 32-byte hex, got {s}");
-    let bytes: Vec<String> = (0..32)
-        .map(|i| format!("0x{}", &h[2 * i..2 * i + 2]))
-        .collect();
-    format!("[{}]", bytes.join(", "))
+/// Parses the generated tokens as a Rust file and prints it: invalid Rust
+/// fails here, at generation, rather than in the crate that includes it.
+fn render(header: &str, code: TokenStream) -> String {
+    let file: syn::File =
+        syn::parse2(code).unwrap_or_else(|e| panic!("noir-zk-codegen generated invalid Rust: {e}"));
+    format!("{header}{}", prettyplease::unparse(&file))
 }
 
 /// Rust types for one circuit's ABI: struct definitions named by their Noir
 /// path, suffixed with their array lengths when one path has several shapes.
 struct Types {
-    defs: BTreeMap<String, String>,
+    defs: BTreeMap<String, TokenStream>,
     names: BTreeMap<String, String>,
 }
 
@@ -59,16 +63,24 @@ impl Types {
         ty.to_string()
     }
 
-    fn rust(&mut self, ty: &Value, all: &[Value]) -> String {
+    fn rust(&mut self, ty: &Value, all: &[Value]) -> TokenStream {
         match ty["kind"].as_str() {
-            Some("field") => "Fr".into(),
-            Some("boolean") => "bool".into(),
+            Some("field") => quote!(Fr),
+            Some("boolean") => quote!(bool),
             Some("integer") => {
                 assert_eq!(ty["sign"], "unsigned", "signed integers are not supported");
-                format!("u{}", ty["width"])
+                let t = format_ident!("u{}", ty["width"].as_u64().expect("integer width"));
+                quote!(#t)
             }
-            Some("array") => format!("[{}; {}]", self.rust(&ty["type"], all), ty["length"]),
-            Some("struct") => self.strukt(ty, all),
+            Some("array") => {
+                let t = self.rust(&ty["type"], all);
+                let n = u64_lit(ty["length"].as_u64().expect("array length"));
+                quote!([#t; #n])
+            }
+            Some("struct") => {
+                let name = ident(&self.strukt(ty, all));
+                quote!(#name)
+            }
             other => panic!("unsupported ABI kind {other:?}"),
         }
     }
@@ -97,7 +109,7 @@ impl Types {
             format!("{base}{}", lens.join("x"))
         };
         self.names.insert(sig, name.clone());
-        let fields: Vec<(String, String)> = ty["fields"]
+        let fields: Vec<(String, TokenStream)> = ty["fields"]
             .as_array()
             .into_iter()
             .flatten()
@@ -116,30 +128,27 @@ impl Types {
 
 /// A struct with public fields and its `FromFields` impl (fields read in
 /// declaration order, which is ABI order).
-fn struct_def(name: &str, doc: &str, fields: &[(String, String)]) -> String {
-    let mut def = format!(
-        "    /// {doc}\n    #[derive(Clone, Debug, PartialEq, Eq)]\n    pub struct {name} {{\n"
-    );
-    for (f, t) in fields {
-        writeln!(def, "        pub {f}: {t},").ok();
+fn struct_def(name: &str, text: &str, fields: &[(String, TokenStream)]) -> TokenStream {
+    let doc = doc(text);
+    let name = ident(name);
+    let names: Vec<_> = fields.iter().map(|(f, _)| ident(f)).collect();
+    let types: Vec<_> = fields.iter().map(|(_, t)| t).collect();
+    quote! {
+        #doc
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub struct #name {
+            #(pub #names: #types,)*
+        }
+
+        impl noir_zk_core::FromFields for #name {
+            const FIELDS: usize = 0 #(+ <#types as noir_zk_core::FromFields>::FIELDS)*;
+            fn read(r: &mut noir_zk_core::FieldReader<'_>) -> Result<Self, noir_zk_core::Error> {
+                Ok(Self {
+                    #(#names: <#types as noir_zk_core::FromFields>::read(r)?,)*
+                })
+            }
+        }
     }
-    def.push_str("    }\n\n");
-    let count: Vec<String> = fields
-        .iter()
-        .map(|(_, t)| format!("<{t} as noir_zk_core::FromFields>::FIELDS"))
-        .collect();
-    let reads: Vec<String> = fields
-        .iter()
-        .map(|(f, t)| format!("            {f}: <{t} as noir_zk_core::FromFields>::read(r)?,\n"))
-        .collect();
-    writeln!(
-        def,
-        "    impl noir_zk_core::FromFields for {name} {{\n        const FIELDS: usize = 0{};\n        fn read(r: &mut noir_zk_core::FieldReader<'_>) -> Result<Self, noir_zk_core::Error> {{\n            Ok(Self {{\n{}            }})\n        }}\n    }}",
-        count.iter().map(|c| format!(" + {c}")).collect::<String>(),
-        reads.concat().replace("            ", "                "),
-    )
-    .ok();
-    def
 }
 
 /// Every struct type reachable from `ty` (to detect shapes sharing a path).
@@ -156,33 +165,63 @@ fn collect_structs(ty: &Value, out: &mut Vec<Value>) {
     }
 }
 
+/// An expression to flatten: a place (`w.a.index`), or a loop variable over
+/// an array's elements (`e0`), which is a reference and is read as `*e0`.
+struct Expr {
+    place: TokenStream,
+    element: bool,
+}
+
 /// Code pushing `expr`'s field elements onto `v`, in ACIR witness order.
-fn flatten(ty: &Value, expr: &str, depth: usize, out: &mut String) {
-    let pad = format!("            {}", "    ".repeat(depth));
+fn flatten(ty: &Value, expr: &Expr, depth: usize) -> TokenStream {
+    let place = &expr.place;
+    let value = if expr.element {
+        quote!(*#place)
+    } else {
+        quote!(#place)
+    };
     match ty["kind"].as_str() {
-        Some("field") => writeln!(out, "{pad}v.push({expr});"),
-        Some("boolean") | Some("integer") => writeln!(out, "{pad}v.push(Fr::from({expr}));"),
+        Some("field") => quote!(v.push(#value);),
+        Some("boolean") | Some("integer") => quote!(v.push(Fr::from(#value));),
         Some("array") => {
-            // Iterate by reference so nested arrays (`*e0` is `[T; N]`) and
+            // Iterate by reference so nested arrays (`e0` is `&[T; N]`) and
             // struct elements both work: `for e1 in e0.iter()`.
-            let var = format!("e{depth}");
-            let over = expr.strip_prefix('*').unwrap_or(expr);
-            writeln!(out, "{pad}for {var} in {over}.iter() {{").ok();
-            flatten(&ty["type"], &format!("*{var}"), depth + 1, out);
-            writeln!(out, "{pad}}}")
+            let var = format_ident!("e{depth}");
+            let inner = flatten(
+                &ty["type"],
+                &Expr {
+                    place: quote!(#var),
+                    element: true,
+                },
+                depth + 1,
+            );
+            quote! {
+                for #var in #place.iter() {
+                    #inner
+                }
+            }
         }
         Some("struct") => {
             // Fields of an array element: `e0.name` (auto-deref), not `*e0.name`.
-            let base = expr.strip_prefix('*').unwrap_or(expr);
-            for f in ty["fields"].as_array().into_iter().flatten() {
-                let name = f["name"].as_str().unwrap_or("field");
-                flatten(&f["type"], &format!("{base}.{name}"), depth, out);
-            }
-            Ok(())
+            ty["fields"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|f| {
+                    let name = ident(f["name"].as_str().unwrap_or("field"));
+                    flatten(
+                        &f["type"],
+                        &Expr {
+                            place: quote!(#place.#name),
+                            element: false,
+                        },
+                        depth,
+                    )
+                })
+                .collect()
         }
         other => panic!("unsupported ABI kind {other:?}"),
     }
-    .ok();
 }
 
 fn field_count(ty: &Value) -> u64 {
@@ -255,12 +294,23 @@ fn is_kernel(abi: &Value) -> bool {
     })
 }
 
+/// A circuit's identity, for [`circuit_module`]: the body of its `CircuitId`
+/// impl, and `Honk`, `App`, `Kernel` or `Hiding`.
+struct Identity<'a> {
+    consts: TokenStream,
+    kind: &'a str,
+}
+
 /// A module for one circuit: its typed inputs and outputs, and a marker
 /// implementing `noir_zk_core::Circuit` (flattening inputs in ACIR witness
-/// order). With `identity` (a `CircuitId` impl body, and `Honk`, `App`,
-/// `Kernel` or `Hiding`) it also implements `CircuitId` and `Honk`, `App` or
-/// `Kernel`.
-fn circuit_module(label: &str, abi: &Value, doc: &str, identity: Option<(&str, &str)>) -> String {
+/// order). With an identity it also implements `CircuitId` and `Honk`,
+/// `App` or `Kernel`.
+fn circuit_module(
+    label: &str,
+    abi: &Value,
+    text: &str,
+    identity: Option<Identity<'_>>,
+) -> TokenStream {
     let params = abi["parameters"].as_array().expect("parameters");
     let ret = abi["return_type"].get("abi_type");
     let mut all = vec![];
@@ -277,17 +327,26 @@ fn circuit_module(label: &str, abi: &Value, doc: &str, identity: Option<(&str, &
     // `pub` parameters go to `PublicInputs` (UltraHonk's claim), the rest to
     // `Inputs`; witness order interleaves them as the ABI declares them.
     let (mut fields, mut public) = (vec![], vec![]);
-    let (mut flat, mut flat_public) = (String::new(), String::new());
+    let (mut flat, mut flat_public) = (TokenStream::new(), TokenStream::new());
     for p in params {
         let name = p["name"].as_str().expect("param name");
         let t = types.rust(&p["type"], &all);
+        let n = ident(name);
         if p["visibility"] == "public" {
             public.push((name.to_string(), t));
-            flatten(&p["type"], &format!("p.{name}"), 0, &mut flat);
-            flatten(&p["type"], &format!("p.{name}"), 0, &mut flat_public);
+            let e = Expr {
+                place: quote!(p.#n),
+                element: false,
+            };
+            flat.extend(flatten(&p["type"], &e, 0));
+            flat_public.extend(flatten(&p["type"], &e, 0));
         } else {
             fields.push((name.to_string(), t));
-            flatten(&p["type"], &format!("w.{name}"), 0, &mut flat);
+            let e = Expr {
+                place: quote!(w.#n),
+                element: false,
+            };
+            flat.extend(flatten(&p["type"], &e, 0));
         }
     }
     let mut inputs = struct_def(
@@ -296,18 +355,17 @@ fn circuit_module(label: &str, abi: &Value, doc: &str, identity: Option<(&str, &
         &fields,
     );
     let public_type = if public.is_empty() {
-        "()"
+        quote!(())
     } else {
-        inputs.push('\n');
-        inputs.push_str(&struct_def(
+        inputs.extend(struct_def(
             "PublicInputs",
             "The `pub` `main` parameters, in ABI order.",
             &public,
         ));
-        "PublicInputs"
+        quote!(PublicInputs)
     };
-    let out_type = ret.map_or("()".to_string(), |r| types.rust(r, &all));
-    let outputs = ret.map_or(0, field_count);
+    let out_type = ret.map_or_else(|| quote!(()), |r| types.rust(r, &all));
+    let outputs = u64_lit(ret.map_or(0, field_count));
     // A hiding kernel's `vk_tree_root` output, which verifiers must check.
     let root_at = ret
         .filter(|r| r["kind"] == "struct")
@@ -316,72 +374,108 @@ fn circuit_module(label: &str, abi: &Value, doc: &str, identity: Option<(&str, &
             let i = fs.iter().position(|f| f["name"] == "vk_tree_root")?;
             Some(fs[..i].iter().map(|f| field_count(&f["type"])).sum::<u64>())
         })
-        .map_or("None".to_string(), |i| format!("Some({i})"));
-    let marker = camel(label);
-    let mut code = format!("/// {doc}\npub mod {label} {{\n    use noir_zk_core::Field as Fr;\n\n");
-    for def in types.defs.values() {
-        writeln!(code, "{def}").ok();
-    }
-    writeln!(
-        code,
-        "{inputs}\n    /// What `main` returns (through the databus, or public for a hiding kernel).\n    pub type Outputs = {out_type};\n\n    /// Field elements the circuit returns.\n    pub const OUTPUT_FIELDS: usize = {outputs};\n\n    /// The `{label}` circuit.\n    pub struct {marker};\n\n    impl noir_zk_core::Circuit for {marker} {{\n        type Witness = Inputs;\n        type PublicInputs = {public_type};\n        type Outputs = Outputs;\n        const VK_TREE_ROOT_OUTPUT: Option<usize> = {root_at};\n        #[allow(unused_mut, unused_variables)]\n        fn public_inputs(p: &{public_type}) -> Vec<Fr> {{\n            let mut v = Vec::new();\n{flat_public}            v\n        }}\n        #[allow(unused_variables)]\n        fn witness_inputs(w: &Inputs, p: &{public_type}) -> Vec<Fr> {{\n            let mut v = Vec::new();\n{flat}            v\n        }}\n    }}"
-    )
-    .ok();
-    if let Some((id, kind)) = identity {
-        writeln!(
-            code,
-            "\n    impl noir_zk_core::CircuitId for {marker} {{\n{id}    }}"
-        )
-        .ok();
-        if kind == "Honk" {
-            writeln!(code, "\n    impl noir_zk_core::Honk for {marker} {{}}").ok();
-        } else if kind == "App" {
-            writeln!(code, "\n    impl noir_zk_core::App for {marker} {{}}").ok();
-        } else {
-            assert!(
-                is_kernel(abi),
-                "{label}: a kernel's parameters must be among {KERNEL_PARAMS:?}"
-            );
-            let ty = |n: &str| {
-                fields
-                    .iter()
-                    .find(|(f, _)| f == n)
-                    .map_or("()".to_string(), |(_, t)| t.clone())
-            };
-            let mut body = String::new();
-            for (f, _) in &fields {
-                let v = match f.as_str() {
-                    "prev" | "step" | "vk_tree_root" => format!("k.{f}"),
-                    vk => format!("noir_zk_core::KernelInputs::<Self::Prev, Self::Step>::vk(&k.{vk}, \"{vk}\")?"),
+        .map_or_else(
+            || quote!(None),
+            |i| {
+                let i = u64_lit(i);
+                quote!(Some(#i))
+            },
+        );
+    let module = ident(label);
+    let marker = ident(&camel(label));
+    let defs = types.defs.values();
+    let mod_doc = doc(text);
+    let marker_doc = doc(&format!("The `{label}` circuit."));
+    let identity = identity.map(|Identity { consts, kind }| {
+        let role = match kind {
+            "Honk" => quote!(impl noir_zk_core::Honk for #marker {}),
+            "App" => quote!(impl noir_zk_core::App for #marker {}),
+            _ => {
+                assert!(
+                    is_kernel(abi),
+                    "{label}: a kernel's parameters must be among {KERNEL_PARAMS:?}"
+                );
+                let ty = |n: &str| {
+                    fields
+                        .iter()
+                        .find(|(f, _)| f == n)
+                        .map_or_else(|| quote!(()), |(_, t)| t.clone())
                 };
-                writeln!(body, "                {f}: {v},").ok();
+                let (prev, step) = (ty("prev"), ty("step"));
+                let body = fields.iter().map(|(f, _)| {
+                    let n = ident(f);
+                    match f.as_str() {
+                        "prev" | "step" | "vk_tree_root" => quote!(#n: k.#n,),
+                        vk => quote!(#n: noir_zk_core::KernelInputs::<Self::Prev, Self::Step>::vk(&k.#n, #vk)?,),
+                    }
+                });
+                quote! {
+                    impl noir_zk_core::Kernel for #marker {
+                        type Prev = #prev;
+                        type Step = #step;
+                        fn witness(k: noir_zk_core::KernelInputs<Self::Prev, Self::Step>) -> Result<Inputs, noir_zk_core::Error> {
+                            Ok(Inputs { #(#body)* })
+                        }
+                    }
+                }
             }
-            writeln!(
-                code,
-                "\n    impl noir_zk_core::Kernel for {marker} {{\n        type Prev = {};\n        type Step = {};\n        fn witness(k: noir_zk_core::KernelInputs<Self::Prev, Self::Step>) -> Result<Inputs, noir_zk_core::Error> {{\n            Ok(Inputs {{\n{body}            }})\n        }}\n    }}",
-                ty("prev"),
-                ty("step"),
-            )
-            .ok();
+        };
+        quote! {
+            impl noir_zk_core::CircuitId for #marker {
+                #consts
+            }
+            #role
+        }
+    });
+    quote! {
+        #mod_doc
+        pub mod #module {
+            use noir_zk_core::Field as Fr;
+            #(#defs)*
+            #inputs
+
+            #[doc = " What `main` returns (through the databus, or public for a hiding kernel)."]
+            pub type Outputs = #out_type;
+
+            #[doc = " Field elements the circuit returns."]
+            pub const OUTPUT_FIELDS: usize = #outputs;
+
+            #marker_doc
+            pub struct #marker;
+
+            impl noir_zk_core::Circuit for #marker {
+                type Witness = Inputs;
+                type PublicInputs = #public_type;
+                type Outputs = Outputs;
+                const VK_TREE_ROOT_OUTPUT: Option<usize> = #root_at;
+                #[allow(unused_mut, unused_variables)]
+                fn public_inputs(p: &#public_type) -> Vec<Fr> {
+                    let mut v = Vec::new();
+                    #flat_public
+                    v
+                }
+                #[allow(unused_variables)]
+                fn witness_inputs(w: &Inputs, p: &#public_type) -> Vec<Fr> {
+                    let mut v = Vec::new();
+                    #flat
+                    v
+                }
+            }
+            #identity
         }
     }
-    code.push_str("}\n\n");
-    code
 }
 
 /// Typed inputs and `Circuit` impls for `abis` (no identities or keys): the
 /// generated code depends only on `noir-zk-core`.
 pub fn generate_types(abis: &[CircuitAbi]) -> String {
-    let mut code = String::from("// @generated by noir-zk-codegen. Do not edit.\n\n");
-    for c in abis {
-        code.push_str(&circuit_module(
-            &c.label,
-            &c.abi,
-            &format!("`{}`.", c.label),
-            None,
-        ));
-    }
-    code
+    let modules = abis
+        .iter()
+        .map(|c| circuit_module(&c.label, &c.abi, &format!("`{}`.", c.label), None));
+    render(
+        "// @generated by noir-zk-codegen. Do not edit.\n\n",
+        quote!(#(#modules)*),
+    )
 }
 
 /// What [`generate_registry_with`] bundles: the bytecode of the active
@@ -473,6 +567,12 @@ pub fn generate_registry(dir: &Path) -> String {
     generate_registry_with(dir, &Options::default())
 }
 
+/// A file of the host crate, as the generated code includes it.
+fn resource(rel: &str) -> TokenStream {
+    let rel = format!("/{rel}");
+    quote!(concat!(env!("CARGO_MANIFEST_DIR"), #rel))
+}
+
 /// [`generate_registry`] with [`Options`].
 pub fn generate_registry_with(dir: &Path, options: &Options) -> String {
     let manifest_path = dir.join("circuits/manifest.toml");
@@ -511,17 +611,34 @@ pub fn generate_registry_with(dir: &Path, options: &Options) -> String {
         })
         .collect();
 
-    let mut code = String::from(
-        "// @generated by noir-zk-codegen from circuits/manifest.toml and resources/. Do not edit.\n\n",
-    );
+    let mut code = TokenStream::new();
     for key in ["noir", "bb"] {
         let v = manifest.get(key).and_then(|v| v.as_str()).unwrap_or("");
-        writeln!(code, "/// {key} version the frozen artifacts were built with.\npub const {}_VERSION: &str = {v:?};", key.to_uppercase()).ok();
+        let name = format_ident!("{}_VERSION", key.to_uppercase());
+        let doc = doc(&format!(
+            "{key} version the frozen artifacts were built with."
+        ));
+        code.extend(quote! {
+            #doc
+            pub const #name: &str = #v;
+        });
     }
-    writeln!(code, "/// Root of the verification key tree the kernels check (zero without one).\npub const VK_TREE_ROOT: [u8; 32] = {};\n", manifest.get("vk_tree_root").map_or_else(|| hex32(&"0".repeat(64)), |r| hex32(r.as_str().expect("vk_tree_root")))).ok();
-
+    let vk_tree_root = bytes32(
+        manifest
+            .get("vk_tree_root")
+            .map_or("0".repeat(64).as_str(), |r| {
+                r.as_str().expect("vk_tree_root")
+            }),
+    );
+    code.extend(quote! {
+        #[doc = " Root of the verification key tree the kernels check (zero without one)."]
+        pub const VK_TREE_ROOT: [u8; 32] = #vk_tree_root;
+    });
     if let Some((name, version)) = &library {
-        writeln!(code, "/// The library this registry is frozen as.\npub const LIBRARY: noir_zk_core::Library = noir_zk_core::Library {{ name: {name:?}, version: {version:?} }};\n").ok();
+        code.extend(quote! {
+            #[doc = " The library this registry is frozen as."]
+            pub const LIBRARY: noir_zk_core::Library = noir_zk_core::Library { name: #name, version: #version };
+        });
     }
     // The families' view of the active circuits (record widths need the ABIs).
     let mut actives: BTreeMap<String, pipelines::Active> = BTreeMap::new();
@@ -553,9 +670,7 @@ pub fn generate_registry_with(dir: &Path, options: &Options) -> String {
 
     let mut apps: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut kernels_with_step: Vec<(String, String)> = vec![];
-    let mut registry = String::from(
-        "/// Every frozen circuit version.\npub const REGISTRY: &[noir_zk_core::RegistryEntry] = &[\n",
-    );
+    let mut registry = vec![];
     for c in manifest
         .get("circuit")
         .and_then(|c| c.as_array())
@@ -571,13 +686,13 @@ pub fn generate_registry_with(dir: &Path, options: &Options) -> String {
         ) {
             ("ultra_honk", _) => {
                 let oracle = match c.get("oracle").and_then(|o| o.as_str()) {
-                    Some("keccak") => "Keccak",
-                    Some("poseidon2") => "Poseidon2",
+                    Some("keccak") => format_ident!("Keccak"),
+                    Some("poseidon2") => format_ident!("Poseidon2"),
                     o => panic!("{label}: unknown oracle {o:?}"),
                 };
                 (
                     "Honk",
-                    format!("noir_zk_core::ProofSystem::UltraHonk(noir_zk_core::Oracle::{oracle})"),
+                    quote!(noir_zk_core::ProofSystem::UltraHonk(noir_zk_core::Oracle::#oracle)),
                 )
             }
             ("chonk", Some(role)) => {
@@ -587,22 +702,22 @@ pub fn generate_registry_with(dir: &Path, options: &Options) -> String {
                     "hiding" => "Hiding",
                     r => panic!("{label}: unknown Chonk role {r}"),
                 };
+                let r = ident(role);
                 (
                     role,
-                    format!("noir_zk_core::ProofSystem::Chonk(noir_zk_core::ChonkRole::{role})"),
+                    quote!(noir_zk_core::ProofSystem::Chonk(noir_zk_core::ChonkRole::#r)),
                 )
             }
             (s, r) => panic!("{label}: unknown proof system {s} (role {r:?})"),
         };
         let rel = format!("resources/circuits/{label}/{version}");
         let abi_file = dir.join(&rel).join("abi.json");
-        let res = |f: &str| format!("concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/{rel}/{f}\")");
         let (index, siblings) = match (status, paths.get(label)) {
-            ("active", Some((i, s))) => (
-                format!("Some({i})"),
-                s.iter().map(|h| hex32(h)).collect::<Vec<_>>().join(", "),
-            ),
-            _ => ("None".into(), String::new()),
+            ("active", Some((i, s))) => {
+                let i = u64_lit(*i);
+                (quote!(Some(#i)), s.iter().map(|h| bytes32(h)).collect())
+            }
+            _ => (quote!(None), vec![]),
         };
         // The key's pin: recorded by freeze, and it must be the embedded key's.
         let vk_file = dir.join(&rel).join("circuit.vk");
@@ -617,10 +732,10 @@ pub fn generate_registry_with(dir: &Path, options: &Options) -> String {
             recorded, vk_hash,
             "{label}@{version}: vk_sha256 doesn't match circuit.vk"
         );
-        let vk_sha = hex32(&vk_hash);
+        let vk_sha = bytes32(&vk_hash);
         let status_v = match status {
-            "active" => "Active",
-            "deprecated" => "Deprecated",
+            "active" => format_ident!("Active"),
+            "deprecated" => format_ident!("Deprecated"),
             s => panic!("{label}: unknown status {s}"),
         };
         let (layer, family) = if status == "active" {
@@ -628,18 +743,36 @@ pub fn generate_registry_with(dir: &Path, options: &Options) -> String {
         } else {
             (String::new(), String::new())
         };
-        let vk_hash_hex = c
-            .get("vk_hash")
-            .and_then(|h| h.as_str())
-            .map_or_else(|| hex32(&"0".repeat(64)), hex32);
-        writeln!(
-            registry,
-            "    noir_zk_core::RegistryEntry {{\n        label: {label:?},\n        version: {version:?},\n        system: {system},\n        status: noir_zk_core::Status::{status_v},\n        bytecode_sha256: {},\n        vk_sha256: {vk_sha},\n        vk_hash: {vk_hash_hex},\n        layer: {layer:?},\n        family: {family:?},\n        abi: {},\n        vk: include_bytes!({}),\n        vk_index: {index},\n        vk_siblings: &[{siblings}],\n    }},",
-            hex32(c["bytecode_sha256"].as_str().expect("bytecode_sha256")),
-            if status == "active" { format!("Some(include_str!({}))", res("abi.json")) } else { "None".into() },
-            res("circuit.vk"),
-        )
-        .ok();
+        let vk_hash_v = bytes32(
+            c.get("vk_hash")
+                .and_then(|h| h.as_str())
+                .unwrap_or(&"0".repeat(64)),
+        );
+        let bytecode_sha = bytes32(c["bytecode_sha256"].as_str().expect("bytecode_sha256"));
+        let abi = if status == "active" {
+            let f = resource(&format!("{rel}/abi.json"));
+            quote!(Some(include_str!(#f)))
+        } else {
+            quote!(None)
+        };
+        let vk = resource(&format!("{rel}/circuit.vk"));
+        registry.push(quote! {
+            noir_zk_core::RegistryEntry {
+                label: #label,
+                version: #version,
+                system: #system,
+                status: noir_zk_core::Status::#status_v,
+                bytecode_sha256: #bytecode_sha,
+                vk_sha256: #vk_sha,
+                vk_hash: #vk_hash_v,
+                layer: #layer,
+                family: #family,
+                abi: #abi,
+                vk: include_bytes!(#vk),
+                vk_index: #index,
+                vk_siblings: &[#(#siblings),*],
+            }
+        });
 
         if status != "active" {
             continue;
@@ -666,16 +799,19 @@ pub fn generate_registry_with(dir: &Path, options: &Options) -> String {
                 format!("assets/{label}@{version}.b64"),
             ));
         }
-        let id = format!(
-            "        const LABEL: &'static str = {label:?};\n        const VERSION: &'static str = {version:?};\n        const SYSTEM: noir_zk_core::ProofSystem = {system};\n        const BYTECODE_SHA256: [u8; 32] = {};\n        const VK_BYTES: &'static [u8] = include_bytes!({});\n        const VK_SHA256: [u8; 32] = {vk_sha};\n",
-            hex32(c["bytecode_sha256"].as_str().expect("sha")),
-            res("circuit.vk"),
-        );
-        code.push_str(&circuit_module(
+        let consts = quote! {
+            const LABEL: &'static str = #label;
+            const VERSION: &'static str = #version;
+            const SYSTEM: noir_zk_core::ProofSystem = #system;
+            const BYTECODE_SHA256: [u8; 32] = #bytecode_sha;
+            const VK_BYTES: &'static [u8] = include_bytes!(#vk);
+            const VK_SHA256: [u8; 32] = #vk_sha;
+        };
+        code.extend(circuit_module(
             label,
             &abi,
             &format!("`{label}` {version} ({kind})."),
-            Some((&id, kind)),
+            Some(Identity { consts, kind }),
         ));
         if kind == "Kernel" || kind == "Hiding" {
             if let Some(step) = abi["parameters"]
@@ -699,59 +835,72 @@ pub fn generate_registry_with(dir: &Path, options: &Options) -> String {
             apps.entry(key).or_default().push(label.to_string());
         }
     }
-    registry.push_str("];\n");
-    code.push_str(&registry);
-    code.push_str("\n/// Static dispatch from an app label to its circuit type (`noir_zk_core::AppDispatch`).\npub struct Registry;\n");
+    code.extend(quote! {
+        #[doc = " Every frozen circuit version."]
+        pub const REGISTRY: &[noir_zk_core::RegistryEntry] = &[#(#registry),*];
+
+        #[doc = " Static dispatch from an app label to its circuit type (`noir_zk_core::AppDispatch`)."]
+        pub struct Registry;
+    });
     for labels in apps.values() {
-        let out = format!(
-            "<{}::{} as noir_zk_core::Circuit>::Outputs",
-            labels[0],
-            camel(&labels[0])
-        );
-        let arms: String = labels
-            .iter()
-            .map(|l| {
-                format!(
-                    "            {l:?} => Some(v.visit::<{l}::{}>()),\n",
-                    camel(l)
-                )
-            })
-            .collect();
-        writeln!(
-            code,
-            "\nimpl noir_zk_core::AppDispatch<{out}> for Registry {{\n    fn visit_app<V: noir_zk_core::AppVisitor<{out}>>(label: &str, v: V) -> Option<V::Output> {{\n        match label {{\n{arms}            _ => None,\n        }}\n    }}\n}}"
-        )
-        .ok();
+        let (m, t) = (ident(&labels[0]), ident(&camel(&labels[0])));
+        let out = quote!(<#m::#t as noir_zk_core::Circuit>::Outputs);
+        let arms = labels.iter().map(|l| {
+            let (m, t) = (ident(l), ident(&camel(l)));
+            quote!(#l => Some(v.visit::<#m::#t>()),)
+        });
+        code.extend(quote! {
+            impl noir_zk_core::AppDispatch<#out> for Registry {
+                fn visit_app<V: noir_zk_core::AppVisitor<#out>>(label: &str, v: V) -> Option<V::Output> {
+                    match label {
+                        #(#arms)*
+                        _ => None,
+                    }
+                }
+            }
+        });
     }
     if !options.bundle.is_empty() {
-        code.push_str("\n/// Bundled bytecode assets (`<label>@<version>.b64`), for a `BundledStore`.\npub const ASSETS: &[(&str, &[u8])] = &[\n");
-        for (asset, rel) in &assets {
-            writeln!(code, "    ({asset:?}, include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/{rel}\"))),").ok();
-        }
-        code.push_str("];\n");
+        let entries = assets.iter().map(|(asset, rel)| {
+            let f = resource(rel);
+            quote!((#asset, include_bytes!(#f)))
+        });
+        code.extend(quote! {
+            #[doc = " Bundled bytecode assets (`<label>@<version>.b64`), for a `BundledStore`."]
+            pub const ASSETS: &[(&str, &[u8])] = &[#(#entries),*];
+        });
     }
     if let Some(lib) = &library {
         let families =
             pipelines::families(dir, &manifest, (&lib.0, &lib.1), &actives, &options.sources);
         let declared = pipelines::pipelines(&manifest, &families);
-        code.push('\n');
-        code.push_str(&pipelines::emit(&families, &declared));
+        code.extend(pipelines::emit(&families, &declared));
     }
     // Kernels that fold an app: wrap one, typed or chosen at runtime.
     for (label, step) in &kernels_with_step {
-        let marker = format!("{label}::{}", camel(label));
-        let select = if apps.contains_key(step) {
-            "\n    /// Wraps the app `label` (chosen at runtime) with its `Prover.toml` inputs; fails unless it is an app this kernel folds.\n    pub fn select<'i>(label: &str, toml: &'i str) -> Result<noir_zk_core::Wrapped<'i, Self>, noir_zk_core::Error> {\n        noir_zk_core::Wrapped::select::<Registry>(label, toml)\n    }\n".to_string()
-        } else {
-            String::new()
-        };
-        writeln!(
-            code,
-            "\nimpl {marker} {{\n    /// Wraps app `C` (typed witness) to be folded by this kernel.\n    pub fn wrap<C: noir_zk_core::App<Outputs = <Self as noir_zk_core::Kernel>::Step>>(witness: &C::Witness) -> noir_zk_core::Wrapped<'static, Self> {{\n        noir_zk_core::Wrapped::new::<C>(witness)\n    }}\n{select}}}"
-        )
-        .ok();
+        let (m, t) = (ident(label), ident(&camel(label)));
+        let select = apps.contains_key(step).then(|| {
+            quote! {
+                #[doc = " Wraps the app `label` (chosen at runtime) with its `Prover.toml` inputs; fails unless it is an app this kernel folds."]
+                pub fn select<'i>(label: &str, toml: &'i str) -> Result<noir_zk_core::Wrapped<'i, Self>, noir_zk_core::Error> {
+                    noir_zk_core::Wrapped::select::<Registry>(label, toml)
+                }
+            }
+        });
+        code.extend(quote! {
+            impl #m::#t {
+                #[doc = " Wraps app `C` (typed witness) to be folded by this kernel."]
+                pub fn wrap<C: noir_zk_core::App<Outputs = <Self as noir_zk_core::Kernel>::Step>>(witness: &C::Witness) -> noir_zk_core::Wrapped<'static, Self> {
+                    noir_zk_core::Wrapped::new::<C>(witness)
+                }
+                #select
+            }
+        });
     }
-    code
+    render(
+        "// @generated by noir-zk-codegen from circuits/manifest.toml and resources/. Do not edit.\n\n",
+        code,
+    )
 }
 
 #[cfg(test)]
