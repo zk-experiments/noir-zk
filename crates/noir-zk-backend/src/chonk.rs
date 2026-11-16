@@ -7,7 +7,7 @@
 //! serialised by one lock.
 
 use ark_ff::PrimeField;
-use barretenberg_rs::generated_types::{ChonkProof, CircuitInput, CircuitInputNoVK};
+use barretenberg_rs::generated::bb_types::{Bin32, ChonkProof, CircuitInput, CircuitInputNoVK};
 
 use crate::bb::{bb, bb_err};
 
@@ -93,7 +93,7 @@ impl FoldedProof {
 pub fn prove(steps: &[Step<'_>]) -> Result<FoldedProof, Error> {
     let (_guard, mut api) = bb()?;
     srs::ensure(&mut api)?;
-    api.chonk_start(steps.iter().map(|s| s.kind.code()).collect())
+    api.chonk_start(&steps.iter().map(|s| s.kind.code()).collect::<Vec<_>>())
         .map_err(bb_err("chonk start"))?;
     for s in steps {
         let circuit = CircuitInput {
@@ -114,7 +114,7 @@ pub fn prove(steps: &[Step<'_>]) -> Result<FoldedProof, Error> {
 pub fn verify(proof: &FoldedProof, hiding_vk: &[u8]) -> Result<bool, Error> {
     let (_guard, mut api) = bb()?;
     srs::ensure(&mut api)?;
-    let fields = proof.fields.iter().map(|f| f.to_vec()).collect();
+    let fields = proof.fields.iter().map(Bin32::from).collect();
     Ok(api
         .chonk_verify_from_fields(fields, hiding_vk)
         .map_err(bb_err("chonk verify"))?

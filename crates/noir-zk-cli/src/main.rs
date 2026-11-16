@@ -29,8 +29,8 @@
 //! is proved by UltraHonk with the `--honk-oracle` transcript hash (default
 //! `poseidon2`; `keccak` for EVM verifiers).
 //!
-//! Versions: an unchanged bytecode is skipped; a changed bytecode with the
-//! same ABI is a patch bump; an ABI change needs `--abi-change` (minor). The
+//! Versions: an unchanged bytecode with an unchanged key is skipped; a changed
+//! bytecode (or key, under a new bb) with the same ABI is a patch bump; an ABI change needs `--abi-change` (minor). The
 //! superseded version becomes `deprecated`: it keeps its key, loses its ABI.
 //!
 //! `--check` derives everything again and fails if a committed active entry
@@ -526,8 +526,14 @@ fn freeze(o: &Opts) {
                             failed += 1;
                         }
                     }
+                    continue;
                 }
-                continue;
+                // Unchanged bytecode keeps its version unless its key changed
+                // (a new bb): then it is a patch bump like a bytecode change.
+                let committed = std::fs::read(dir_of(v).join("circuit.vk")).unwrap_or_default();
+                if committed == derive_vk(c) {
+                    continue;
+                }
             }
         }
         if check {

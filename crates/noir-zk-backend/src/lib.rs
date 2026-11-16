@@ -32,7 +32,7 @@ pub use noir_zk_kernels as kernels;
 
 /// The barretenberg version linked (`barretenberg-rs`): keys and proofs are
 /// only valid for this version.
-pub const BB_VERSION: &str = "7.0.0-nightly.20260927";
+pub const BB_VERSION: &str = "7.0.0-nightly.20261110";
 
 #[cfg(feature = "http")]
 pub use store::HttpStore;

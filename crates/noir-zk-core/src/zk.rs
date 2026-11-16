@@ -79,7 +79,7 @@ pub enum ChonkRole {
 
 impl ChonkRole {
     /// bb's numbering (Chonk circuit kind).
-    pub const fn code(self) -> u32 {
+    pub const fn code(self) -> u8 {
         match self {
             Self::App => 0,
             Self::Kernel => 1,

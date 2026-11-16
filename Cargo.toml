@@ -36,13 +36,13 @@ prettyplease = "0.3"
 toml_edit = "0.23"
 # barretenberg via FFI. Must be the exact bb the circuits' keys are derived
 # with (mise.toml BB_VERSION): proofs only verify with the version that made them.
-barretenberg-rs = { version = "=7.0.0-nightly.20260927", default-features = false, features = ["ffi"] }
+barretenberg-rs = { version = "=7.0.0-nightly.20261110", default-features = false, features = ["ffi"] }
 # Noir ACVM witness solving, at the Noir release the circuits
-# are compiled with (mise.toml NOIR_VERSION; bb 7.0.0-nightly.20260927 is built
+# are compiled with (mise.toml NOIR_VERSION; bb 7.0.0-nightly.20261110 is built
 # on exactly this commit).
-acir = "=1.0.0-rc.3"
-acvm = "=1.0.0-rc.3"
-bn254_blackbox_solver = "=1.0.0-rc.3"
+acir = "=1.0.0-rc.5"
+acvm = "=1.0.0-rc.5"
+bn254_blackbox_solver = "=1.0.0-rc.5"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

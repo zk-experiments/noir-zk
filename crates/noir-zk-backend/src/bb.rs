@@ -3,21 +3,19 @@
 
 use std::sync::{Mutex, MutexGuard};
 
-use barretenberg_rs::api::BarretenbergApi;
-use barretenberg_rs::backends::FfiBackend;
+use barretenberg_rs::BbApi;
+use barretenberg_rs::FfiBackend;
 
 use noir_zk_core::Error;
 
 static BB_LOCK: Mutex<()> = Mutex::new(());
 
-pub(crate) fn bb() -> Result<(MutexGuard<'static, ()>, BarretenbergApi<FfiBackend>), Error> {
+pub(crate) fn bb() -> Result<(MutexGuard<'static, ()>, BbApi<FfiBackend>), Error> {
     let guard = BB_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let backend = FfiBackend::new().map_err(|e| Error::Proof(format!("bb init: {e}")))?;
-    Ok((guard, BarretenbergApi::new(backend)))
+    Ok((guard, BbApi::new(backend)))
 }
 
-pub(crate) fn bb_err(
-    what: &str,
-) -> impl Fn(barretenberg_rs::error::BarretenbergError) -> Error + '_ {
+pub(crate) fn bb_err(what: &str) -> impl Fn(barretenberg_rs::BarretenbergError) -> Error + '_ {
     move |e| Error::Proof(format!("bb {what}: {e}"))
 }

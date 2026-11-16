@@ -21,9 +21,9 @@
 
 use poseidon::poseidon2::Poseidon2;
 
-/// Fields of a Chonk (Mega) verification key (bb 7.0.0-nightly.20260927).
+/// Fields of a Chonk (Mega) verification key (bb 7.0.0-nightly.20261110).
 pub global VK_FIELDS: u32 = 151;
-/// Recursion proof types of bb 7.0.0-nightly.20260927.
+/// Recursion proof types of bb 7.0.0-nightly.20261110.
 pub global PROOF_TYPE_OINK: u32 = 1;
 pub global PROOF_TYPE_HN: u32 = 2;
 pub global PROOF_TYPE_HN_FINAL: u32 = 7;
@@ -144,7 +144,7 @@ impl Layout {
 ///
 /// The key's hash is `vk.key_hash`, not recomputed here: `std::verify_proof_with_type(key, _, _,
 /// key_hash, _)` makes Barretenberg hash `key` in-circuit and constrain the result equal to
-/// `key_hash`, so a key that isn't the one hashed can't be folded. In bb 7.0.0-nightly.20260927
+/// `key_hash`, so a key that isn't the one hashed can't be folded. In bb 7.0.0-nightly.20261110
 /// (aztec-packages 5cb127606d5921cf7995287f7985e00f2c534d54, barretenberg/cpp/src/barretenberg):
 /// `dsl/acir_format/recursion_constraint.cpp:195` pairs every recursion constraint's `key_hash`
 /// witness with its `key`; `chonk/chonk.cpp:293` verifies each queue entry (OINK, HN and
