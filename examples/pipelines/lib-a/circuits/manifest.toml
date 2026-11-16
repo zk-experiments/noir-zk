@@ -1,7 +1,7 @@
 # Written by noir-zk freeze; do not edit.
 
-noir = "1.0.0-rc.3"
-bb = "7.0.0-nightly.20260927"
+noir = "1.0.0-rc.5"
+bb = "7.0.0-nightly.20261110"
 
 [[circuit]]
 label = "counter_big"

@@ -11,8 +11,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use barretenberg_rs::api::BarretenbergApi;
-use barretenberg_rs::backends::FfiBackend;
+use barretenberg_rs::BbApi;
+use barretenberg_rs::FfiBackend;
 use sha2::{Digest, Sha256};
 
 use noir_zk_core::Error;
@@ -94,7 +94,7 @@ fn read_prefix(path: &Path, points: u32, pinned: &str) -> Result<Vec<u8>, Error>
 
 /// Loads both setups into bb, once per process (bb's CRS is process-global
 /// and one-shot). The caller holds the backend lock.
-pub(crate) fn ensure(api: &mut BarretenbergApi<FfiBackend>) -> Result<(), Error> {
+pub(crate) fn ensure(api: &mut BbApi<FfiBackend>) -> Result<(), Error> {
     if LOADED.get().is_some() {
         return Ok(());
     }

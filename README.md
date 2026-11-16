@@ -7,7 +7,7 @@
 
 Tooling and a library for proving Noir circuits with barretenberg, in Rust: standalone UltraHonk proofs and Chonk folding. A circuit repository freezes its compiled circuits with the `noir-zk` CLI, generates typed bindings with `noir-zk-codegen` from its `build.rs`, and proves and verifies through `noir-zk-backend`. [eid-circuits](https://github.com/zk-experiments/eid-circuits) (crate `eid-circuits`) is the first consumer.
 
-Toolchain: Noir `1.0.0-rc.3` (the linked ACVM), Barretenberg `7.0.0-nightly.20260927` (linked through `barretenberg-rs`, no `bb` binary needed). Proofs from other bb versions do not verify.
+Toolchain: Noir `1.0.0-rc.5` (the linked ACVM), Barretenberg `7.0.0-nightly.20261110` (linked through `barretenberg-rs`, no `bb` binary needed). Proofs from other bb versions do not verify.
 
 ## Crates
 

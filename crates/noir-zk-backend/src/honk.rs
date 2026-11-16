@@ -12,7 +12,9 @@
 //! circuit's [`Oracle`], frozen with it.
 
 use ark_ff::{BigInteger, PrimeField};
-use barretenberg_rs::generated_types::{CircuitInput, CircuitInputNoVK, ProofSystemSettings};
+use barretenberg_rs::generated::bb_types::{
+    Bin32, CircuitInput, CircuitInputNoVK, ProofSystemSettings,
+};
 
 use noir_zk_core::{
     from_fields, Artifacts, CircuitId, Error, Field, FromFields, Honk, Oracle, ProofGenerator,
@@ -36,8 +38,10 @@ fn to_field(b: &[u8]) -> Field {
     Field::from_be_bytes_mod_order(b)
 }
 
-fn to_bytes(f: &Field) -> Vec<u8> {
-    f.into_bigint().to_bytes_be()
+fn to_bytes(f: &Field) -> Bin32 {
+    let mut b = [0u8; 32];
+    b.copy_from_slice(&f.into_bigint().to_bytes_be());
+    Bin32(b)
 }
 
 fn oracle_of<C: CircuitId>() -> Result<Oracle, Error> {
@@ -98,7 +102,7 @@ pub fn verify(vk: &[u8], proof: &HonkProof, oracle: Oracle) -> Result<bool, Erro
         .circuit_verify(
             vk,
             proof.public_inputs.iter().map(to_bytes).collect(),
-            proof.proof.iter().map(|f| f.to_vec()).collect(),
+            proof.proof.iter().map(Bin32::from).collect(),
             settings(oracle),
         )
         .map_err(bb_err("verify"))?
