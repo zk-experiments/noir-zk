@@ -88,6 +88,8 @@ struct Solving {
     program: Program,
     vk: Vec<u8>,
     witness: Vec<u8>,
+    /// Its inputs in witness-index order (for `NOIR_ZK_BENCH_DUMP`).
+    inputs: Vec<Field>,
 }
 
 /// A pipeline fold in progress; `L` is the link the next position must accept.
@@ -254,6 +256,7 @@ impl<'a, L: Link> PipelineFold<'a, L> {
             program,
             vk: self.artifacts.vk(label)?,
             witness: solved.witness,
+            inputs: inputs.to_vec(),
         });
         Ok(solved.outputs)
     }
@@ -292,7 +295,8 @@ impl<'a, L: Link> PipelineFold<'a, L> {
         let label = step.label;
         // The app: `Prover.toml` encoded by its ABI.
         let program = self.program(label)?;
-        let solved = program.solve(program.inputs_from_toml(&step.toml)?)?;
+        let app_inputs = program.fields_from_toml(&step.toml)?;
+        let solved = program.solve(program.inputs_from_fields(&app_inputs)?)?;
         if solved.outputs.len() != family.record_fields || family.record_fields > R {
             return Err(Error::Abi(format!(
                 "{label} returns {} fields, family {} declares {}",
@@ -316,6 +320,7 @@ impl<'a, L: Link> PipelineFold<'a, L> {
             program,
             vk: self.artifacts.vk(label)?,
             witness: solved.witness,
+            inputs: app_inputs,
         });
         // The kernel after it.
         let tree = self
@@ -404,12 +409,43 @@ impl<'a, L: Link> PipelineFold<'a, L> {
             })
             .collect();
         let proof = chonk::prove(&steps)?;
+        if let Some(dir) = std::env::var_os("NOIR_ZK_BENCH_DUMP") {
+            self.dump(&std::path::Path::new(&dir).join(self.pipeline.name), &proof, &public)?;
+        }
         if proof.public_fields(PUBLIC_FIELDS)? != public {
             return Err(Error::Proof(
                 "the proof's public fields differ from the hiding kernel's outputs".into(),
             ));
         }
         Ok((proof, public))
+    }
+}
+
+impl<L> PipelineFold<'_, L> {
+    /// Writes the fold's circuits, inputs and proof for an external (WASM)
+    /// prover to replay: `fold.json`, `proof.bin`, `public.json`.
+    fn dump(&self, dir: &std::path::Path, proof: &FoldedProof, public: &[Field]) -> Result<(), Error> {
+        use base64::Engine;
+        let io = |e: std::io::Error| Error::Proof(format!("bench dump {}: {e}", dir.display()));
+        let steps: Vec<_> = self
+            .circuits
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "name": c.label,
+                    "kind": c.kind.code(),
+                    "bytecode": base64::engine::general_purpose::STANDARD.encode(c.program.bytecode()),
+                    "vk": hex::encode(&c.vk),
+                    "inputs": c.inputs.iter().map(hex).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        std::fs::create_dir_all(dir).map_err(io)?;
+        std::fs::write(dir.join("fold.json"), serde_json::Value::from(steps).to_string()).map_err(io)?;
+        std::fs::write(dir.join("proof.bin"), proof.to_bytes()).map_err(io)?;
+        let public: Vec<_> = public.iter().map(hex).collect();
+        std::fs::write(dir.join("public.json"), serde_json::to_string(&public).unwrap_or_default())
+            .map_err(io)
     }
 }
 
